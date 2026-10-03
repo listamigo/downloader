@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="descargas" path="descargas/" />
+    <external-files-path name="descargas_raiz" path="." />
+</paths>

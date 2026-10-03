@@ -32,3 +32,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Cookies y tokens locales
+cookies.txt
+tokengit

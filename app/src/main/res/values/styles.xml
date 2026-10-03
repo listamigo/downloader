@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Widget.ElimdDownloader.TopAppBar" parent="android:Widget">
+    </style>
+
+    <style name="Widget.ElimdDownloader.Card" parent="android:Widget">
+    </style>
+
+    <style name="Widget.ElimdDownloader.Button" parent="android:Widget">
+    </style>
+</resources>

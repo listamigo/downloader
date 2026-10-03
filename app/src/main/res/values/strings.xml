@@ -1,0 +1,31 @@
+<resources>
+    <string name="app_name">elimd downloader</string>
+    <string name="search_hint">Busca un video o URL de YouTube…</string>
+    <string name="download">Descargar</string>
+    <string name="downloading">Descargando…</string>
+    <string name="completed">Completado</string>
+    <string name="failed">Error</string>
+    <string name="paused">Pausado</string>
+    <string name="cancel">Eliminar</string>
+    <string name="cancel_all">Vaciar todo</string>
+    <string name="no_downloads">No hay descargas</string>
+    <string name="no_results">Sin resultados</string>
+    <string name="load_more">Cargar más</string>
+    <string name="previous">Anterior</string>
+    <string name="next">Siguiente</string>
+    <string name="quality">Calidad</string>
+    <string name="audio_only">Solo audio</string>
+    <string name="video_only">Solo video</string>
+    <string name="open_with">Abrir con…</string>
+    <string name="settings">Configuración</string>
+    <string name="theme">Tema</string>
+    <string name="language">Idioma</string>
+    <string name="download_location">Ubicación de descarga</string>
+    <string name="notifications">Notificaciones</string>
+    <string name="dark_mode">Modo oscuro</string>
+    <string name="system_theme">Tema del sistema</string>
+    <string name="manage_downloads">Gestionar descargas</string>
+    <string name="download_completed">Descarga completada</string>
+    <string name="download_failed">Error en la descarga</string>
+    <string name="download_started">Descarga iniciada</string>
+</resources>
