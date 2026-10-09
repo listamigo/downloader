@@ -145,7 +145,15 @@ data class AppSettings(
     val enableBackgroundAudio: Boolean = true,
     val maxConcurrentDownloads: Int = 3,
     val wallpaperEnabled: Boolean = false,
-    val wallpaperSource: String = "downloads" // "downloads", "thumbnail", "none"
+    val wallpaperSource: String = "downloads", // "downloads", "thumbnail", "none"
+
+    /**
+     * Plan B (ADR-022): resolver metadatos y bajar bytes desde un servidor
+     * propio con yt-dlp, en vez del extractor local. Apagado por defecto: sin
+     * un servidor configurado la app funciona igual que siempre.
+     */
+    val useRemoteServer: Boolean = false,
+    val serverUrl: String = ""
 )
 
 enum class AppTheme {

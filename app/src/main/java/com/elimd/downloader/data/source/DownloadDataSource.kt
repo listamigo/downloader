@@ -70,5 +70,11 @@ data class DownloadEngineProgress(
     val eta: Long, // seconds
     val totalSize: Long,
     val downloaded: Long,
-    val status: DownloadStatus
+    val status: DownloadStatus,
+    // Nombre del fichero sin extension: la notificacion de foreground service
+    // vive fuera de la app y no puede consultarlo en Room.
+    val fileName: String? = null,
+    // Motivo del fallo. Sin el, el usuario solo ve "fallida" y la notificacion
+    // de error no tiene nada que decir.
+    val error: String? = null
 )

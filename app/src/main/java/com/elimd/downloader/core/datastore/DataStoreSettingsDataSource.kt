@@ -36,6 +36,8 @@ class DataStoreSettingsDataSource(
         val MAX_CONCURRENT = intPreferencesKey("max_concurrent")
         val WALLPAPER_ENABLED = booleanPreferencesKey("wallpaper_enabled")
         val WALLPAPER_SOURCE = stringPreferencesKey("wallpaper_source")
+        val USE_REMOTE_SERVER = booleanPreferencesKey("use_remote_server")
+        val SERVER_URL = stringPreferencesKey("server_url")
     }
 
     override suspend fun saveSettings(settings: AppSettings) {
@@ -51,6 +53,8 @@ class DataStoreSettingsDataSource(
             prefs[Keys.MAX_CONCURRENT] = settings.maxConcurrentDownloads
             prefs[Keys.WALLPAPER_ENABLED] = settings.wallpaperEnabled
             prefs[Keys.WALLPAPER_SOURCE] = settings.wallpaperSource
+            prefs[Keys.USE_REMOTE_SERVER] = settings.useRemoteServer
+            prefs[Keys.SERVER_URL] = settings.serverUrl
         }
     }
 
@@ -69,7 +73,9 @@ class DataStoreSettingsDataSource(
                 enableBackgroundAudio = prefs[Keys.BACKGROUND_AUDIO] ?: true,
                 maxConcurrentDownloads = prefs[Keys.MAX_CONCURRENT] ?: 3,
                 wallpaperEnabled = prefs[Keys.WALLPAPER_ENABLED] ?: false,
-                wallpaperSource = prefs[Keys.WALLPAPER_SOURCE] ?: "downloads"
+                wallpaperSource = prefs[Keys.WALLPAPER_SOURCE] ?: "downloads",
+                useRemoteServer = prefs[Keys.USE_REMOTE_SERVER] ?: false,
+                serverUrl = prefs[Keys.SERVER_URL] ?: ""
             )
         }
 

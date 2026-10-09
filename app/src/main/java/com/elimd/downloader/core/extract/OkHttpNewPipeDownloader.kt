@@ -1,6 +1,7 @@
 package com.elimd.downloader.core.extract
 
 import android.util.Log
+import com.elimd.downloader.BuildConfig
 import com.elimd.downloader.core.network.YouTubeSession
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -108,7 +109,16 @@ class OkHttpNewPipeDownloader(
 
     companion object {
         private const val TAG = "ExtractorHttp"
-        private const val DEBUG_PATHS = true
+
+        /**
+         * El diagnostico de `playabilityStatus` solo se registra en depuracion.
+         *
+         * En release escribe en logcat el motivo del bloqueo de YouTube; aunque
+         * no filtra cookies, es trafico del usuario que no tiene por que quedar
+         * en registros de produccion. Con `BuildConfig.DEBUG` la decision la
+         * toma el compilador y no hay rama que se olvide de cambiar.
+         */
+        private val DEBUG_PATHS = BuildConfig.DEBUG
 
         private val PLAYABILITY_STATUS = "\"playabilityStatus\"\\s*:\\s*\\{\\s*\"status\"\\s*:\\s*\"([^\"]+)\"".toRegex()
         private val PLAYABILITY_REASON = "\"reason\"\\s*:\\s*\"([^\"]+)\"".toRegex()

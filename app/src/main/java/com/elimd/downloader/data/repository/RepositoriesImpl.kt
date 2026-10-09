@@ -68,25 +68,31 @@ class DownloadRepositoryImpl @Inject constructor(
      * Escribir en Room en cada tick saturaba al consumidor y hacia que se
      * perdiera el evento final, asi que se limita la frecuencia: el progreso se
      * guarda como maximo cada [PROGRESS_WRITE_INTERVAL_MS], pero un cambio de
-     * estado terminal (completado, fallido, cancelado) se escribe siempre.
+     * estado (completado, fallido, cancelado) se escribe siempre.
+     *
+     * El estado y el reloj van **por descarga**: con un unico par global, con
+     * dos descargas en marcha casi todo contaba como "cambio" y el
+     * estrangulamiento no estrangulaba nada.
      */
     private suspend fun observeEngineProgress() {
-        var lastWriteAt = 0L
-        var lastStatus: DownloadStatus? = null
+        val lastWriteAt = mutableMapOf<Long, Long>()
+        val lastStatus = mutableMapOf<Long, DownloadStatus>()
 
         engine.progressFlow
             .filterNotNull()
             .collect { progress ->
                 val now = System.currentTimeMillis()
-                val statusChanged = progress.status != lastStatus
-                val intervalElapsed = now - lastWriteAt >= PROGRESS_WRITE_INTERVAL_MS
+                val previousStatus = lastStatus[progress.downloadId]
+                val statusChanged = progress.status != previousStatus
+                val intervalElapsed =
+                    now - (lastWriteAt[progress.downloadId] ?: 0L) >= PROGRESS_WRITE_INTERVAL_MS
 
                 // Un cambio de estado siempre se escribe; el progreso solo cuando
                 // ha pasado el intervalo, para no martillear la base de datos.
                 if (!statusChanged && !intervalElapsed) return@collect
 
-                lastWriteAt = now
-                lastStatus = progress.status
+                lastWriteAt[progress.downloadId] = now
+                lastStatus[progress.downloadId] = progress.status
 
                 dataSource.updateStatus(
                     id = progress.downloadId,
@@ -96,7 +102,10 @@ class DownloadRepositoryImpl @Inject constructor(
                     eta = progress.eta,
                     downloadedBytes = progress.downloaded,
                     totalBytes = progress.totalSize,
-                    completedAt = if (progress.status == DownloadStatus.COMPLETED) now else null
+                    completedAt = if (progress.status == DownloadStatus.COMPLETED) now else null,
+                    // Sin esto la columna `error` nunca se escribia desde el
+                    // motor: el usuario veia "fallida" sin motivo alguno.
+                    error = progress.error
                 )
             }
     }
@@ -262,6 +271,14 @@ class SettingsRepositoryImpl @Inject constructor(
         val current = getSettings()
         saveSettings(current.copy(wallpaperSource = source))
     }
+    override suspend fun updateUseRemoteServer(enabled: Boolean) {
+        val current = getSettings()
+        saveSettings(current.copy(useRemoteServer = enabled))
+    }
+    override suspend fun updateServerUrl(url: String) {
+        val current = getSettings()
+        saveSettings(current.copy(serverUrl = url))
+    }
     override suspend fun clearAllSettings() = dataSource.clearSettings()
 }
 /**
@@ -281,10 +298,6 @@ internal fun sanitizeFileName(title: String): String {
         .trim()
     return cleaned.take(80).ifEmpty { "descarga" }
 }
-
-/** Un estado terminal no debe perder nunca su escritura en la base de datos. */
-private fun DownloadStatus.isTerminal(): Boolean =
-    this == DownloadStatus.COMPLETED || this == DownloadStatus.FAILED || this == DownloadStatus.CANCELLED
 
 /** Frecuencia maxima de escritura del progreso en Room. */
 private const val PROGRESS_WRITE_INTERVAL_MS = 500L

@@ -27,7 +27,9 @@ import com.elimd.downloader.domain.usecase.UpdateLanguageUseCase
 import com.elimd.downloader.domain.usecase.UpdateDownloadTypeUseCase
 import com.elimd.downloader.domain.usecase.UpdateMaxConcurrentDownloadsUseCase
 import com.elimd.downloader.domain.usecase.UpdateShowNotificationsUseCase
+import com.elimd.downloader.domain.usecase.UpdateServerUrlUseCase
 import com.elimd.downloader.domain.usecase.UpdateThemeUseCase
+import com.elimd.downloader.domain.usecase.UpdateUseRemoteServerUseCase
 import com.elimd.downloader.domain.usecase.UpdateWallpaperEnabledUseCase
 import com.elimd.downloader.domain.usecase.UpdateWallpaperSourceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -101,7 +103,9 @@ class MainViewModel @Inject constructor(
     private val updateBackgroundAudio: UpdateBackgroundAudioUseCase,
     private val updateMaxConcurrentDownloads: UpdateMaxConcurrentDownloadsUseCase,
     private val updateWallpaperEnabled: UpdateWallpaperEnabledUseCase,
-    private val updateWallpaperSource: UpdateWallpaperSourceUseCase
+    private val updateWallpaperSource: UpdateWallpaperSourceUseCase,
+    private val updateUseRemoteServer: UpdateUseRemoteServerUseCase,
+    private val updateServerUrl: UpdateServerUrlUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MainUiState())
@@ -127,14 +131,25 @@ class MainViewModel @Inject constructor(
                     )
                 }
             }
-            .catch { _uiState.update { state -> state.copy(isLoading = false) } }
+            .catch { error ->
+                // Sin el log, un fallo del flow de DataStore dejaria la pantalla
+                // cargando para siempre sin rastro alguno.
+                Log.e(TAG, "No se pudieron leer los ajustes", error)
+                _uiState.update { state -> state.copy(isLoading = false) }
+            }
             .launchIn(viewModelScope)
     }
 
     private fun observeDownloads() {
         getAllDownloads()
             .onEach { list -> _downloads.value = list }
-            .catch { }
+            .catch { error ->
+                // El catch vacio congelaba la lista para siempre: el usuario
+                // miraria descargas viejas como si fueran actuales, sin log ni
+                // aviso. La excepcion se registra y se avisa por snackbar.
+                Log.e(TAG, "No se pudo leer la lista de descargas", error)
+                _uiState.update { it.copy(message = "No se pudo leer la lista de descargas") }
+            }
             .launchIn(viewModelScope)
     }
 
@@ -343,6 +358,12 @@ class MainViewModel @Inject constructor(
 
     fun setWallpaperSource(source: String) =
         viewModelScope.launch { updateWallpaperSource(source) }
+
+    fun setUseRemoteServer(enabled: Boolean) =
+        viewModelScope.launch { updateUseRemoteServer(enabled) }
+
+    fun setServerUrl(url: String) =
+        viewModelScope.launch { updateServerUrl(url) }
 
     fun consumeMessage() {
         _uiState.update { it.copy(message = null) }

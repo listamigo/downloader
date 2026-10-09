@@ -141,13 +141,19 @@ class NewPipeMediaResolver @Inject constructor(
 
     override suspend fun getRelatedVideos(videoId: String, limit: Int): List<YouTubeVideo> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            try {
                 streamInfo(videoId)
                     .relatedStreams
                     .toVideos()
                     .filter { it.videoId != videoId }
                     .take(limit)
-            }.getOrDefault(emptyList())
+            } catch (e: Exception) {
+                // Mismo criterio que getVideoInfo, en este mismo fichero: si la
+                // red falla, "0 relacionados" no es un resultado, es una mentira
+                // que parece verdad. Se registra y se propaga.
+                Log.e(TAG, "No se pudieron obtener los relacionados de $videoId", e)
+                throw e
+            }
         }
 
     override suspend fun resolveStream(

@@ -9,6 +9,8 @@ import com.elimd.downloader.core.download.DownloadEngineImpl
 import com.elimd.downloader.core.extract.MediaResolver
 import com.elimd.downloader.core.extract.NewPipeMediaResolver
 import com.elimd.downloader.core.extract.OkHttpNewPipeDownloader
+import com.elimd.downloader.core.extract.ServerMediaResolver
+import com.elimd.downloader.core.extract.SwitchingMediaResolver
 import com.elimd.downloader.core.network.YouTubeSearchDataSourceImpl
 import com.elimd.downloader.core.network.YouTubeSession
 import com.elimd.downloader.data.repository.DownloadRepositoryImpl
@@ -86,6 +88,16 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    @LocalResolver
+    fun provideLocalMediaResolver(impl: NewPipeMediaResolver): MediaResolver = impl
+
+    @Provides
+    @Singleton
+    @RemoteResolver
+    fun provideRemoteMediaResolver(impl: ServerMediaResolver): MediaResolver = impl
+
+    @Provides
+    @Singleton
     fun provideYouTubeSearchDataSource(
         @ApplicationContext context: Context,
         resolver: MediaResolver,
@@ -115,7 +127,7 @@ abstract class RepositoryModule {
 
     @Binds
     @Singleton
-    abstract fun bindMediaResolver(impl: NewPipeMediaResolver): MediaResolver
+    abstract fun bindMediaResolver(impl: SwitchingMediaResolver): MediaResolver
 }
 
 @Module

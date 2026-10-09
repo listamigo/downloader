@@ -93,5 +93,9 @@ interface SettingsRepository {
 
     suspend fun updateWallpaperSource(source: String)
 
+    suspend fun updateUseRemoteServer(enabled: Boolean)
+
+    suspend fun updateServerUrl(url: String)
+
     suspend fun clearAllSettings()
 }

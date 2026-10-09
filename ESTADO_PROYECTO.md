@@ -1,7 +1,7 @@
 # ESTADO DEL PROYECTO - elimd downloader
 
 > **Documento de traspaso.** Es la referencia para continuar el trabajo.
-> Última actualización: **2026-10-03 (sesión 2)**
+> Última actualización: **2026-10-09 (sesión de C4)**
 > Verificado en dispositivo real: **Xiaomi 220333QAG, Android 16 (API 36), arm64-v8a**
 
 ---
@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | Build | **VERDE** — `./gradlew :app:assembleDebug` |
-| Tests | **118 unitarios + 12 instrumentados, en verde** |
+| Tests | **145 unitarios + 12 instrumentados, en verde** |
 | APK | 23 MB |
 | Descarga real | **VERIFICADA** — 1080p completo, 59,7 MB, MP4 con imagen y sonido |
 | Bloqueo de YouTube | **RESUELTO con cookies de sesión** (§5) |
@@ -632,37 +632,87 @@ estado anterior los declaraba COMPLETOS). Mientras tanto, Reproducir delega en
 el reproductor externo vía `ACTION_VIEW` + FileProvider, **que ya funciona**.
 Por tanto P3 es una mejora de experiencia, no un bloqueante.
 
-### P4 · MEDIA — Más tests
+### P4 · ~~ALTA — Más tests~~ → Ampliado a 12 ficheros (2026-10-05)
 
-Hoy hay 26: `SearchResponseSanitizerTest` (5), `DownloadFileNameTest` (6) y
-`StreamSelectionTest` (15). Faltan, por valor:
+Ya no son 26 tests en 3 ficheros. El recuento real por fichero:
+
+| Fichero | Tests |
+|---|---|
+| `core/network/YouTubeSessionTest` | 19 |
+| `core/extract/StreamSelectionTest` | 17 |
+| `core/download/MuxerFormatTest` | 17 |
+| `core/download/SegmentPlannerTest` | 16 |
+| `core/extract/StreamResolutionPlanTest` | 12 |
+| `core/download/DownloadEtaTest` | 9 |
+| `feature/downloads/RemainingLabelTest` | 7 |
+| `core/download/ByteFormatTest` | 6 |
+| `data/repository/DownloadFileNameTest` | 6 |
+| `domain/model/QualityFromLabelTest` | 5 |
+| `core/extract/SearchResponseSanitizerTest` | 5 |
+| `core/extract/ExtractionErrorsTest` | 4 |
+| `core/download/DownloadServicePolicyTest` | 10 |
+| `core/download/DownloadSlotsTest` | 4 |
+| `core/common/VideoIdTest` | 8 |
+| **Total unitarios** | **145** |
+
+(`StreamSelectionTest` tenía 15 según la versión anterior de este documento;
+ahora son 17.)
+
+Faltan, por valor:
 
 - `HttpFileDownloader`: reanudar con cabecera `Range`, fichero parcial,
   cancelación por corrutina. Es lo más delicado y usa `MockWebServer`.
 - `MediaMuxer`: necesita un dispositivo o instrumentación; no se puede probar
   en la JVM porque depende de los codecs de Android.
-- Tests de use cases con MockK (MockK ya está declarado pero **no se usa**).
+- Tests de use cases con MockK. Ojo: **MockK ya está declarado en
+  `build.gradle.kts` pero no se usa**, y `ADR-015` lo rechaza explícitamente.
+  Hay que decidir una de las dos cosas: quitar la dependencia o revertir el ADR.
 
-### P5 · MEDIA — DownloadService desconectado
+### P5 · ~~MEDIA — DownloadService desconectado~~ → **Hecho** (2026-10-07)
 
-`DownloadService` funciona y gestiona canales, progreso y `FOREGROUND_SERVICE_TYPE`,
-pero **nadie lo arranca**: el motor no lo invoca. La descarga vive mientras el
-proceso esté vivo, sin notificación de fondo real. Si se cierra la app, se
-pierde. Conectar el servicio con `DownloadEngineImpl` y lanzar desde
-`startDownload`.
+El motor arranca el servicio en cada `launchDownload` (punto común a
+`startDownload`, `resume` y `retry`), y el propio servicio observa
+`progressFlow` y decide cuándo apagarse: mientras haya descargas en cola o en
+marcha muestra progreso; cuando el motor queda sin nada activo anuncia el
+resultado (completada / fallo con motivo) y cierra. Ver **ADR-020**.
+
+Detalles que hubo que resolver por el camino:
+
+- La lógica de la notificación vive en `DownloadServicePolicy.kt`, sin un
+  solo import de Android, para poder testearla en la JVM (10 tests).
+- `DownloadEngineProgress` ahora lleva `fileName` y `error`: antes `publish`
+  recibía el motivo del fallo y lo tiraba, así que ni la notificación ni la
+  columna `error` de Room podían mostrarlo.
+- El servicio se detiene solo si el motor no tiene nada trabajando; si el
+  sistema lo reinicia tras matar el proceso (`START_STICKY` con `progressFlow`
+  a `null`), se cierra en cuanto arranca en vez de colgarse con la
+  notificación de "Preparando descarga...".
+- `POST_NOTIFICATIONS` **sí se pide en runtime** (`MainActivity:41-50`); la
+  línea de §8.1 que decía lo contrario era falsa.
+- Sin FGS toda descarga muere con el proceso: era MEDIA, pero con
+  multiplexado una descarga larga en background se quedaba a medias sin
+  avisar.
 
 Con el multiplexado esto pesa más: unir pistas tarda, así que una descarga
-corta en background se queda a medias sin avisar.
+corta en background se quedaba a medias sin avisar. Ya no: el servicio vive
+hasta que el motor termina.
 
 ### P6 · BAJA — Fondo de pantalla
 
 `WallpaperManager` sin implementar (los ajustes ya persisten el estado).
 
-### P7 · BAJA — Migraciones de Room
+### P7 · ~~BAJA — Migraciones de Room~~ → Hecho salvo `exportSchema` (2026-10-05)
 
-`version = 1` y `exportSchema = false`. **Antes de tocar el esquema** hay que
-activar `exportSchema` y escribir la migración; si no, se pierde la BD del
-usuario. Relevante si se añaden columnas (p. ej. velocidad real, que hoy es 0).
+La base de datos está en **`version = 2`**, con `MIGRATION_1_2` definida en
+`AppDatabase.kt` y **registrada** en `AppModule` (`.addMigrations(...)`), sin
+`fallbackToDestructiveMigration`: un esquema roto da crash en vez de borrar los
+datos en silencio.
+
+Lo único que queda es **`exportSchema = false`** y que no exista `app/schemas/`.
+Mientras siga así, Room no puede validar migraciones, `MigrationTestHelper` es
+inviable y la migración es SQL libre escrito a mano. Hay que activar
+`exportSchema` y fijar `schemaLocation` **antes de la siguiente migración**, o la
+validación automática no podrá rescatar nada.
 
 
 ### P10 · MEDIA — Gestión de las cookies desde la app
@@ -685,10 +735,179 @@ NewPipeExtractor se resuelve por **JitPack**, que compila desde el código en
 cada resolución: más lento y dependiente de la disponibilidad de JitPack.
 Alternativa: clonar y publicar como artefacto propio, o bajar de versión.
 
-### P9 · BAJA — Velocidad real
+### P9 · ~~BAJA — Velocidad real~~ → **Hecho** (2026-10-05)
 
-`DownloadEngineProgress.speed` y `eta` se emiten siempre a 0. `HttpFileDownloader`
-podría calcular la velocidad por diferencia de bytes entre muestras.
+`DownloadEngineProgress.speed` y `.eta` ya no se emiten a 0:
+
+- `core/download/DownloadEta.kt` calcula velocidad media y tiempo restante real.
+- Está cableado en **las tres** rutas de `DownloadEngine` (stream único, dos
+  pistas y muxing).
+- `HttpFileDownloader` estrangula los ticks a 150 ms antes de emitirlos.
+- Cubierto por `DownloadEtaTest` (9 tests).
+
+Único matiz de diseño: durante los primeros 2 s devuelve 0, porque con menos
+muestras la velocidad media es ruido. No es un bug.
+
+---
+
+## 8.1 · HALLAZGOS DE LA AUDITORÍA DEL 2026-10-05
+
+Auditoría de solo lectura, ordenada por gravedad. Estado de cada hallazgo tras
+la sesión del **2026-10-09**: **C1, C2, C3, C4, C5 y C6 corregidos** (C3
+parcial), P5 hecho. **Todos los hallazgos de la auditoría quedan cerrados.**
+
+### C1 · `DownloadEngine` tiene carreras reales → **corregido (2026-10-07)**
+
+| Dónde | Qué pasa | Estado |
+|---|---|---|
+| `launchDownload` | Si el job terminaba rápido, `invokeOnCompletion` se ejecutaba antes de guardar el job → `job = null` para siempre y la descarga quedaba indestructible. | **Corregido**: arranque `CoroutineStart.LAZY`; el job se guarda y se registra el handler **antes** de `job.start()`, y si la entrada fue cancelada entre medias el job ni arranca. |
+| `publishStatus` | `activeDownloads.getValue(downloadId)` podía lanzar `NoSuchElementException` si `cancelDownload` borraba la clave entre las dos líneas. | **Corregido**: `computeIfPresent` atómico. |
+| `resumeDownload:296` | `entry.job?.cancel()` es asíncrono: el corrutina viejo seguía escribiendo en `request.target` mientras el relanzado abría otro sobre el mismo fichero. Faltaba `join()`. | **Corregido**: `cancel()` + `join()` antes de relanzar. |
+| `cleanup:325` | Cancelaba el `scope` del `@Singleton` (un `val`): después `startDownload` devolvía `success = true` sin lanzar nada jamás. | **Corregido**: `cleanup` solo cancela el trabajo activo; el scope del singleton vive. |
+| `RepositoriesImpl.kt:73-102` | El estrangulamiento de 500 ms a Room estaba **anulado**: `lastStatus`/`lastWriteAt` eran un único par global, con 2+ descargas casi todo contaba como cambio. | **Corregido**: estado y reloj **por `downloadId`**. |
+| `RepositoriesImpl.kt:286` | `isTerminal()` era código muerto. | **Eliminado** (la regla que prometía su KDoc ya la cumple `statusChanged`). |
+| `DownloadEngine.kt` (publish) | `Log.d` en cada tick, con ticks a 150 ms × 4 segmentos. | **Corregido**: solo se logea cambio de estado. |
+| `cancelDownload` | `publishStatus` llegaba tarde: la entrada ya se había borrado, así que el `CANCELLED` **nunca se emitía** a `progressFlow` y un foreground service no se habría enterado nunca. | **Corregido**: emisión directa tras borrar la entrada. |
+
+Corregido de paso, porque el motor tiraba la información: `publish` recibía el
+motivo del fallo (`error`) y no lo guardaba — `DownloadEngineProgress` ahora
+lo lleva, la notificación lo muestra y `observeEngineProgress` lo escribe en la
+columna `error` de Room (antes esa columna **nunca** se rellenaba desde el
+motor, y el usuario veía "fallida" sin motivo).
+
+Pendiente de esta misma fila: `_progressFlow` sigue siendo **un único
+`StateFlow` para todas las descargas**: cualquier consumidor que no sea el
+repositorio ve solo la última actualizada. El servicio lo tolera a propósito
+(§P5), pero no es el diseño correcto.
+
+### C2 · Violaciones de `r3.md` (prohíbe silenciar excepciones) → **corregido (2026-10-07)**
+
+- `MainViewModel.observeDownloads` — `.catch { }` con lambda **vacía**. Si el
+  Flow de Room petaba, la lista de descargas se quedaba congelada para
+  siempre, sin log. **Corregido**: `Log.e` + snackbar (`message`); el catch de
+  `observeSettings`, que solo quitaba el indicador de carga sin registrar
+  nada, también.
+- `NewPipeMediaResolver.getRelatedVideos` — tragaba la excepción con
+  `runCatching {}.getOrDefault(emptyList())`: si falla la red, "0
+  relacionados" se ve como si fuera verdad. **Corregido**: log + rethrow,
+  el mismo criterio que ya usa `getVideoInfo` en el mismo fichero. Dato
+  relevante: `GetRelatedVideosUseCase` hoy **no lo invoca nadie** (el selector
+  de relacionados no existe en la UI), así que el rethrow no rompe nada — pero
+  el día que se conecte, ya hereda el comportamiento correcto.
+- `YouTubeSearchDataSourceImpl.downloadThumbnail` — el `runCatching` se
+  tragaba **cualquier `Throwable`**, incluido un `OutOfMemoryError` de
+  `body.bytes()`, sin log. **Corregido**: `catch (e: Exception)` con `Log.w` y
+  `null`; los `Error` ya no se silencian. Una miniatura sigue siendo
+  cosmética: sin red no hay imagen, pero queda registrado el porqué.
+
+### C3 · Ajustes sin consumidor (la UI promete lo que no ocurre) → **parcial (2026-10-07)**
+
+Hecho:
+
+- **`maxConcurrentDownloads`**: ahora sí se lee. `DownloadEngineImpl` tiene
+  un `DownloadSlots` (contador con `compareAndSet`): cada job espera su
+  hueco antes de resolver la URL, y el límite se **relee en cada intento**
+  para reaccionar si el usuario lo cambia con descargas en marcha (un
+  `Semaphore` de kotlinx no admite redimensionarse). Mientras espera, el
+  estado sigue siendo `QUEUED` — no se transfiere ningún byte. Cancelado
+  durante la espera: no se cogió hueco y no se suelta. Test:
+  `DownloadSlotsTest` (4, incluido uno con 16 hilos compitiendo para cazar
+  la carrera del CAS).
+- **Tres `onClick = { }` vacíos**: la fila "Ubicación de descarga" se
+  **eliminó** (el ajuste `downloadLocation` no lo consume nadie y no existe
+  selector: la fila prometía algo que no ocurre); "Versión de la aplicación"
+  ahora usa `BuildConfig.VERSION_NAME` en vez del `"1.0.0"` hardcodeado
+  (habilitado `buildFeatures.buildConfig` en `app/build.gradle.kts`) y
+  "Versión" / "Acerca de" son filas informativas **no pulsables** —
+  `SettingsItem` acepta `onClick` nullable y sin él la fila no lleva ripple.
+
+Sigue pendiente:
+
+- Interruptor de wallpaper: persiste el flag y no hace nada (**P6**).
+- `enableBackgroundAudio`, `autoPlayThumbnails`, `showNotifications`: sin
+  consumidor. El campo `downloadLocation` sigue en `AppSettings` (ya no se
+  muestra en la UI) hasta que exista un selector que lo respete;
+  `RepositoriesImpl:113-116` sigue escribiendo siempre en
+  `getExternalFilesDir/descargas`.
+
+### C4 · Seguridad y dependencias — **corregido (2026-10-09)**
+
+- **`.gitignore` tenía un typo** (`tokengit`): no excluía nada, así que un
+  `token.txt` o `token.json` se habría commiteado. **Corregido** el
+  2026-10-05 → `token*` (verificado con `git check-ignore`).
+- **`cookies.txt` real en la raíz del repo** (3278 B, sesión de la cuenta
+  propia) → **Corregido** el 2026-10-09: el fichero se movió **fuera del árbol
+  de trabajo** a `~/cookies-a-donwloader.txt` (no se pisó el `~/cookies.txt`
+  preexistente, que era otro). Ya no hay ninguna credencial en el repo; el
+  `.gitignore` sigue excluyendo `cookies.txt` por si reaparece. Para subirlo al
+  móvil: `adb push ~/cookies-a-donwloader.txt /sdcard/Android/data/com.elimd.downloader/files/cookies.txt`.
+- `OkHttpNewPipeDownloader.kt:111` — `DEBUG_PATHS = true` **sin**
+  `BuildConfig.DEBUG` → **Corregido**: ahora es `BuildConfig.DEBUG`, así que el
+  diagnóstico (`logPlayability`) solo escribe en logcat en depuración. No filtra
+  cookies (solo un booleano), pero sí el motivo del fallo de YouTube.
+- `DownloadsScreen.kt:93` — `startActivity(ACTION_VIEW)` sin `try/catch`:
+  sin reproductor instalado, **crash** → **Corregido**: `catch
+  (ActivityNotFoundException)` con `Log.w` + aviso al usuario.
+- `YouTubeSearchDataSourceImpl.kt:57` — el `videoId` de la red se usa como
+  nombre de fichero sin sanear. Hoy era seguro por accidente, porque
+  `videoIdFromUrl` usa `[\w-]{6,}` → **Corregido**: `core/common/VideoId.kt`
+  expone `sanitizeVideoId`, que solo admite `[A-Za-z0-9_-]{1,64}`; la miniatura
+  descarta cualquier id con otra forma (antes de construir el nombre de fichero
+  o la URL). 8 tests en `VideoIdTest`.
+- ~~`POST_NOTIFICATIONS` se declara pero **nunca se pide en runtime**~~:
+  **falso**. `MainActivity:41-50` lo pide en `onCreate` desde API 33
+  (comprobado 2026-10-07, junto con el resto de esta auditoría).
+- `FOREGROUND_SERVICE_DATA_SYNC` con `targetSdk 34`: cuando suba a 35, Android
+  impondrá límite de 6 h/día y exigirá `Service.onTimeout()`, que no existe.
+- **Dependencias declaradas y sin usar**: `mockk` (y `ADR-015` la rechaza),
+  `retrofit`, `coil-compose` (no hay ni un `AsyncImage`: las miniaturas no se
+  pintan), `navigation-compose`, `work-runtime-ktx`,
+  `okhttp-logging-interceptor`, `media3-exoplayer`/`session`/`ui`.
+- `HttpFileDownloader` **no envía cookies ni `Authorization`** a
+  `googlevideo.com` (correcto por política), lo que significa que todo lo
+  age-restricted o premium fallará aunque la sesión sea válida. No está
+  documentado.
+
+### C5 · `server/` es andamiaje abandonado → **corregido 2026-10-09**
+
+El andamiaje muerto (`server/models/song.py`, `server/utils/helpers.py`) se
+**borró**. En su lugar se construyó el plan B completo (ADR-022), sin copiar el
+proyecto de referencia:
+
+- **`server/`**: backend FastAPI + yt-dlp(librería) + ffmpeg. Núcleo puro
+  (`app/quality.py`, `app/naming.py`) cubierto por 30 tests (`python3 -m
+  unittest discover -s tests -t .`). Ficheros de despliegue en `server/`
+  (`Dockerfile`, `railway.json`, `requirements.txt`, `README.md`). Contrato:
+  `/api/health`, `/api/search`, `/api/video/{id}`, `/api/qualities/{id}`,
+  `/api/media/{id}` (con `Range`), `/api/cookies`, `/api/related` → 501.
+- **Cliente**: `SwitchingMediaResolver` enruta por el ajuste `useRemoteServer`
+  (apagado por defecto) entre `NewPipeMediaResolver` y `ServerMediaResolver`;
+  activado por qualifiers `@LocalResolver`/`@RemoteResolver` en `AppModule`.
+  UI en `SettingsScreen` (switch + URL del servidor).
+
+**Hallazgo de calidad (medido, supera la conclusión previa):** sin PO token
+YouTube solo entrega **itag 18 (360p)**, ni con cookies ni cambiando
+`player_client`. Con PO token (bgutil) + `player_client=default` aparece la
+escalera completa hasta **4K**. El techo no es la IP: es el PO token. El
+servidor lo soporta por `YT_PO_TOKEN`, `YTDLP_POT_SCRIPT` o `YTDLP_POT_BASEURL`
+(sidecar `brainicism/bgutil-ytdlp-pot-provider`).
+
+### C6 · Un test codificaba el diagnóstico equivocado — **corregido 2026-10-05**
+
+`ExtractionErrorsTest` fallaba en `testDebugUnitTest`, y la culpa era del test, no
+del código. El caso `el bloqueo de YouTube dice que va por IP` afirmaba que el
+mensaje debe mencionar "IP" y "red", pero el diagnóstico correcto (§5: no era la
+IP, era la falta de sesión) ya se había aplicado al código y **no al test**.
+
+Test corregido: ahora comprueba que el mensaje habla de `cookies` y de `sesion`, y
+además afirma que **no** contiene "IP". Así, si alguien reintroduce el
+diagnóstico equivocado, el test lo detecta en vez de@darse por bueno.
+
+Verificado tras el cambio: `testDebugUnitTest` → **123 unitarios, 0 fallos, 0
+skipped**, y `assembleDebugAndroidTest` compila.
+
+> Moral: un test que fija el diagnóstico equivocado no es una red de seguridad,
+> es una trampa. Este habría "revertido" el arreglo correcto.
 
 ---
 
@@ -697,12 +916,13 @@ podría calcular la velocidad por diferencia de bytes entre muestras.
 ```
 app/src/main/java/com/elimd/downloader/
 ├── core/
-│   ├── extract/        # MediaResolver, NewPipeMediaResolver, StreamSelection
+│   ├── extract/        # MediaResolver, SwitchingMediaResolver, NewPipe/ServerMediaResolver, StreamSelection
 │   ├── download/       # HttpFileDownloader, MediaMuxer, DownloadEngineImpl
 │   ├── database/       # Room: AppDatabase, DownloadEntity, DownloadDao
 │   ├── datastore/      # DataStoreSettingsDataSource
 │   ├── network/        # YouTubeSearchDataSource (adaptador delgado)
-│   └── di/             # AppModule (Database/DataStore/Network/Repository)
+│   ├── common/         # VideoId: forma segura de un id de YouTube
+│   └── di/             # AppModule (Database/DataStore/Network/Repository) + qualifiers
 ├── domain/
 │   ├── model/          # Models.kt
 │   ├── repository/     # CREADO en fase 1 — sin él, kapt fallaba
@@ -717,10 +937,19 @@ app/src/main/java/com/elimd/downloader/
     └── settings/       # acciones conectadas al ViewModel
 ```
 
-Tests: `app/src/test/` → `SearchResponseSanitizerTest` (5),
-`StreamSelectionTest` (15), `DownloadFileNameTest` (6).
+Tests: `app/src/test/` → **155 tests** (el desglose por fichero está
+en §8-P4). Instrumentados: `app/src/androidTest/` → `Mp4RemuxerTest` (6) y
+`MediaMuxerTest` (6), 12 tests que necesitan dispositivo.
 
-`core/youtubedl/` fue **eliminado** por completo. `feature/player/` **no existe**.
+`core/youtubedl/` fue **eliminado** por completo. `feature/player/` existe pero
+está **vacío** (sin `PlayerScreen` ni `PlayerViewModel`).
+
+Backend del plan B (ADR-022): `server/` (FastAPI + yt-dlp + ffmpeg), con 30
+tests propios y ficheros de despliegue para Railway. El cliente lo activa con
+el ajuste `useRemoteServer`.
+
+Base de datos: `version = 2`, `exportSchema = false`, con `MIGRATION_1_2`
+registrada. Ver §8-P7.
 
 Config: `compileSdk 34`, `minSdk 21`, `targetSdk 34`, AGP 8.2.2, Kotlin 1.9.24,
 Compose compiler 1.5.14, Hilt 2.51, media3 1.3.1.
@@ -737,3 +966,10 @@ Compose compiler 1.5.14, Hilt 2.51, media3 1.3.1.
 Los tres se actualizaron el 2026-10-02 porque describían un `yt-dlp` por
 subprocess que **nunca pudo funcionar** en Android, y el 2026-10-03 para
 recuperar el cambio al cliente iOS, que se había quedado sin documentar.
+
+
+---
+
+## PRINCIPIO DE BÚSQUEDA DE SOLUCIONES
+
+Cuando no se encuentra una solución, no concluir "imposible". Concluir "no encontrada aún". Siempre existe una vía funcional en sistemas informáticos; el deber es hallarla mediante hipótesis, experimentación controlada y verificación con datos.

@@ -9,12 +9,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.elimd.downloader.BuildConfig
 import com.elimd.downloader.domain.model.AppTheme
 import com.elimd.downloader.feature.main.MainViewModel
 
 /**
  * Pantalla de configuración.
- * Permite configurar tema, idioma, ubicación de descarga, notificaciones, etc.
+ * Permite configurar tema, idioma, descargas, notificaciones, etc.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,11 +72,6 @@ fun SettingsScreen(
                     onClick = { viewModel.setDownloadType(com.elimd.downloader.domain.model.DownloadType.valueOf(typeDialogOptions[(typeDialogIndex + 1) % typeDialogOptions.size])) }
                 )
                 SettingsItem(
-                    title = "Ubicación de descarga",
-                    subtitle = settings.downloadLocation,
-                    onClick = { }
-                )
-                SettingsItem(
                     title = "Descargas concurrentes máximas",
                     subtitle = settings.maxConcurrentDownloads.toString(),
                     onClick = { viewModel.setMaxConcurrentDownloads(if (uiState.settings.maxConcurrentDownloads >= 5) 1 else uiState.settings.maxConcurrentDownloads + 1) }
@@ -121,18 +117,38 @@ fun SettingsScreen(
             }
         }
 
+        // Servidor (plan B, ADR-022)
+        item {
+            SettingsSection(title = "Servidor remoto") {
+                SwitchItem(
+                    title = "Usar servidor remoto",
+                    checked = settings.useRemoteServer,
+                    onCheckedChange = viewModel::setUseRemoteServer
+                )
+                Text(
+                    text = "Descarga a través de un backend propio con yt-dlp en lugar " +
+                        "del extractor local. Déjalo apagado si no tienes un servidor.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+                ServerUrlField(
+                    url = settings.serverUrl,
+                    onUrlChange = viewModel::setServerUrl
+                )
+            }
+        }
+
         // Información
         item {
             SettingsSection(title = "Información") {
                 SettingsItem(
                     title = "Versión de la aplicación",
-                    subtitle = "1.0.0",
-                    onClick = { }
+                    subtitle = BuildConfig.VERSION_NAME
                 )
                 SettingsItem(
                     title = "Acerca de",
-                    subtitle = "elimd downloader",
-                    onClick = { }
+                    subtitle = "elimd downloader"
                 )
             }
         }
@@ -168,14 +184,10 @@ fun SettingsSection(
 fun SettingsItem(
     title: String,
     subtitle: String,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
     enabled: Boolean = true
 ) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        color = Color.Transparent
-    ) {
+    val row: @Composable () -> Unit = {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -199,6 +211,16 @@ fun SettingsItem(
                 )
             }
         }
+    }
+    // Sin onClick la fila es informativa: sin ripple ni apariencia pulsable.
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            enabled = enabled,
+            color = Color.Transparent
+        ) { row() }
+    } else {
+        Surface(color = Color.Transparent) { row() }
     }
 }
 
@@ -224,6 +246,29 @@ fun SwitchItem(
             onCheckedChange = onCheckedChange
         )
     }
+}
+
+@Composable
+fun ServerUrlField(
+    url: String,
+    onUrlChange: (String) -> Unit
+) {
+    // El valor vive en un estado local para que escribir no dependa del ritmo
+    // con que DataStore reemite el flow; cada tecla se persiste igual.
+    var input by remember(url) { mutableStateOf(url) }
+    OutlinedTextField(
+        value = input,
+        onValueChange = {
+            input = it
+            onUrlChange(it)
+        },
+        label = { Text("URL del servidor") },
+        placeholder = { Text("https://tu-servidor.up.railway.app") },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -1,6 +1,9 @@
 package com.elimd.downloader.core.download
 
+import android.content.Context
+import android.content.Intent
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.elimd.downloader.core.extract.MediaResolver
 import com.elimd.downloader.core.extract.ResolvedMedia
 import com.elimd.downloader.data.source.DownloadEngine
@@ -9,6 +12,8 @@ import com.elimd.downloader.data.source.DownloadEngineResult
 import com.elimd.downloader.domain.model.DownloadQuality
 import com.elimd.downloader.domain.model.DownloadStatus
 import com.elimd.downloader.domain.model.DownloadType
+import com.elimd.downloader.domain.repository.SettingsRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -17,17 +22,22 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 private const val TAG = "DownloadEngine"
+
+/** Espera entre reintentos al hueco de descarga cuando el limite lo bloquea. */
+private const val SLOT_RETRY_MS = 250L
 
 /**
  * Motor de descargas.
@@ -41,12 +51,18 @@ private const val TAG = "DownloadEngine"
 class DownloadEngineImpl @Inject constructor(
     private val mediaResolver: MediaResolver,
     private val fileDownloader: HttpFileDownloader,
-    private val muxer: MediaMuxer
+    private val muxer: MediaMuxer,
+    private val settings: SettingsRepository,
+    @ApplicationContext private val context: Context
 ) : DownloadEngine {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val activeDownloads = ConcurrentHashMap<Long, DownloadJob>()
+
+    // Limite de "descargas concurrentes" de Ajustes: sin esto el usuario ponia
+    // 1 y seguian yendo 4 en paralelo.
+    private val slots = DownloadSlots()
 
     // StateFlow y no SharedFlow: el progreso es estado, no un evento. Con un
     // buffer limitado, tryEmit descarta el valor cuando el consumidor va lento
@@ -81,7 +97,12 @@ class DownloadEngineImpl @Inject constructor(
         // es como un video de 4 minutos acaba ocupando 60 MB.
         activeDownloads.remove(downloadId)?.job?.cancel()
 
-        activeDownloads[downloadId] = DownloadJob(downloadId, request, null, initialProgress(downloadId))
+        activeDownloads[downloadId] = DownloadJob(
+            downloadId,
+            request,
+            null,
+            initialProgress(downloadId, request.target.nameWithoutExtension)
+        )
 
         launchDownload(downloadId, request)
         return DownloadEngineResult(success = true, pid = downloadId)
@@ -92,16 +113,26 @@ class DownloadEngineImpl @Inject constructor(
         // cancelacion viene de una pausa, la entrada se conserva para que
         // `resumeDownload` pueda relanzarla.
         val settled = AtomicBoolean(false)
-        val job = scope.launch {
+        // Arranque perezoso: el job no puede terminar (ni ejecutar
+        // invokeOnCompletion) antes de que se guarde su referencia. Con
+        // arranque inmediato, una descarga que falla rapido se completaba
+        // entre `launch` y el registro del handler, y la entrada quedaba en el
+        // mapa con `job = null`: pause/cancel dejaban de poder tocarla.
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                val media = mediaResolver.resolveStream(request.videoId, request.quality, request.type)
-                val file = if (media.needsJoining()) {
-                    downloadPartsAndMux(downloadId, request, media)
-                } else {
-                    downloadSingle(downloadId, request, media)
+                awaitDownloadSlot()
+                try {
+                    val media = mediaResolver.resolveStream(request.videoId, request.quality, request.type)
+                    val file = if (media.needsJoining()) {
+                        downloadPartsAndMux(downloadId, request, media)
+                    } else {
+                        downloadSingle(downloadId, request, media)
+                    }
+                    publish(downloadId, 100f, file.length(), file.length(), status = DownloadStatus.COMPLETED)
+                    settled.set(true)
+                } finally {
+                    slots.release()
                 }
-                publish(downloadId, 100f, file.length(), file.length(), status = DownloadStatus.COMPLETED)
-                settled.set(true)
             } catch (e: CancellationException) {
                 // La descarga se pauso o cancelo: no es un fallo.
                 throw e
@@ -121,8 +152,46 @@ class DownloadEngineImpl @Inject constructor(
         job.invokeOnCompletion {
             if (settled.get()) activeDownloads.remove(downloadId)
         }
-        activeDownloads[downloadId]?.let { entry ->
-            activeDownloads[downloadId] = entry.copy(job = job)
+        val entry = activeDownloads[downloadId]
+        if (entry == null) {
+            // Cancelada mientras se preparaba: lanzarla dejaria un trabajo
+            // huerfano escribiendo en un fichero que ya se descarto.
+            job.cancel()
+            return
+        }
+        activeDownloads[downloadId] = entry.copy(job = job)
+        startDownloadService()
+        job.start()
+    }
+
+    /**
+     * Espera a que haya hueco para una descarga mas, segun el limite que el
+     * usuario tenga en Ajustes. Mientras espera, el estado sigue siendo
+     * QUEUED: todavia no se transfiere ningun byte. El limite se relee en
+     * cada intento para reaccionar si el usuario lo cambia con descargas en
+     * marcha. Si se cancela aqui nunca se compro hueco, y por eso el
+     * `finally` que llama a [DownloadSlots.release] va dentro de este metodo
+     * y no fuera.
+     */
+    private suspend fun awaitDownloadSlot() {
+        while (true) {
+            val limit = settings.getSettings().maxConcurrentDownloads
+            if (slots.tryAcquire(limit)) return
+            delay(SLOT_RETRY_MS)
+        }
+    }
+
+    /**
+     * Arranca el foreground service de forma que la descarga sobreviva a salir
+     * de la app. Si el sistema lo impide (Android 12+ en segundo plano), la
+     * descarga sigue adelante: solo se pierde la notificacion.
+     */
+    private fun startDownloadService() {
+        val intent = Intent(context, DownloadService::class.java)
+        try {
+            ContextCompat.startForegroundService(context, intent)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "No se pudo arrancar DownloadService: ${e.message}")
         }
     }
 
@@ -295,7 +364,11 @@ class DownloadEngineImpl @Inject constructor(
 
     override suspend fun resumeDownload(pid: Long) {
         val entry = activeDownloads[pid] ?: return
+        // cancel() es asincrono: sin join el corrutina viejo seguiria
+        // escribiendo en el mismo fichero que acaba de relanzarse, y los dos
+        // trozos acabarian en el mismo archivo.
         entry.job?.cancel()
+        entry.job?.join()
         publishStatus(pid, DownloadStatus.QUEUED)
         launchDownload(pid, entry.request)
     }
@@ -307,7 +380,10 @@ class DownloadEngineImpl @Inject constructor(
         // Una descarga con multiplexado deja video y audio en ficheros aparte:
         // si no se van, la siguiente conservaria un audio a medias.
         discardParts(entry.request.target)
-        publishStatus(pid, DownloadStatus.CANCELLED)
+        // La entrada ya no existe, asi que publishStatus no tendria nada que
+        // actualizar: sin esta emision el servicio de foreground jamas veria el
+        // CANCELLED y se quedaria colgado con la notificacion abierta.
+        _progressFlow.value = entry.progress.copy(status = DownloadStatus.CANCELLED)
     }
 
     override suspend fun cancelAllDownloads() {
@@ -323,15 +399,20 @@ class DownloadEngineImpl @Inject constructor(
         activeDownloads[pid]?.progress
 
     override suspend fun cleanup() {
+        // El scope pertenece a un @Singleton: cancelarlo dejaria el motor muerto
+        // para siempre, y startDownload seguira devolviendo `success = true` sin
+        // lanzar nada. Con cancelar el trabajo activo basta.
         cancelAllDownloads()
-        scope.coroutineContext[Job]?.cancel()
     }
 
     private fun publishStatus(downloadId: Long, status: DownloadStatus) {
         val current = activeDownloads[downloadId]?.progress ?: return
-        activeDownloads[downloadId] = activeDownloads.getValue(downloadId).copy(
-            progress = current.copy(status = status)
-        )
+        // computeIfPresent en vez de getValue: entre la lectura y la escritura
+        // cancelDownload puede haber borrado la clave, y getValue lanzaria
+        // NoSuchElementException en mitad de una pausa.
+        activeDownloads.computeIfPresent(downloadId) { _, value ->
+            value.copy(progress = value.progress.copy(status = status))
+        }
         _progressFlow.value = current.copy(status = status)
     }
 
@@ -344,6 +425,7 @@ class DownloadEngineImpl @Inject constructor(
         status: DownloadStatus,
         error: String? = null
     ) {
+        val previous = activeDownloads[downloadId]
         val snapshot = DownloadEngineProgress(
             pid = downloadId,
             downloadId = downloadId,
@@ -352,16 +434,20 @@ class DownloadEngineImpl @Inject constructor(
             eta = rate.remainingSeconds,
             totalSize = total,
             downloaded = downloaded,
-            status = status
+            status = status,
+            fileName = previous?.progress?.fileName,
+            error = error
         )
-        activeDownloads[downloadId]?.let {
-            activeDownloads[downloadId] = it.copy(progress = snapshot)
-        }
+        if (previous != null) activeDownloads[downloadId] = previous.copy(progress = snapshot)
         _progressFlow.value = snapshot
-        Log.d(TAG, "download=$downloadId $status $percent% error=$error")
+        // Solo cambios de estado: los ticks llegan a 150 ms x 4 segmentos, y el
+        // propio `launchDownload` razona sobre "centenas de ticks por segundo".
+        if (previous?.progress?.status != status) {
+            Log.d(TAG, "download=$downloadId $status $percent% error=$error")
+        }
     }
 
-    private fun initialProgress(downloadId: Long) = DownloadEngineProgress(
+    private fun initialProgress(downloadId: Long, fileName: String) = DownloadEngineProgress(
         pid = downloadId,
         downloadId = downloadId,
         progress = 0f,
@@ -369,7 +455,8 @@ class DownloadEngineImpl @Inject constructor(
         eta = 0L,
         totalSize = 0L,
         downloaded = 0L,
-        status = DownloadStatus.QUEUED
+        status = DownloadStatus.QUEUED,
+        fileName = fileName
     )
 
     private fun extensionFor(type: DownloadType): String = when (type) {

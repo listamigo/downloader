@@ -1,6 +1,9 @@
 package com.elimd.downloader.feature.downloads
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,11 +93,23 @@ fun DownloadsScreen(
                                     "${context.packageName}.fileprovider",
                                     file
                                 )
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW)
-                                        .setDataAndType(uri, download.mimeType)
-                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                )
+                                val intent = Intent(Intent.ACTION_VIEW)
+                                    .setDataAndType(uri, download.mimeType)
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: ActivityNotFoundException) {
+                                    // Sin ninguna app instalada que atienda el
+                                    // mime no hay nada que reproducir: no es un
+                                    // fallo de la descarga, pero antes el
+                                    // ACTION_VIEW implícito reventaba en crash.
+                                    Log.w(TAG, "No hay app para abrir ${download.mimeType}", e)
+                                    Toast.makeText(
+                                        context,
+                                        "No hay ninguna app instalada para reproducir este archivo",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                         },
                         onPause = { viewModel.pause(download.id) },
@@ -247,3 +262,5 @@ private fun statusColor(download: Download) = when (download.status) {
     DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
+
+private const val TAG = "DownloadsScreen"

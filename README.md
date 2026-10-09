@@ -11,17 +11,21 @@ desde el dispositivo**, sin servidor local y sin binarios externos.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arquitectura por capas y la frontera `MediaResolver`. |
 | [docs/DECISIONS_LOG.md](docs/DECISIONS_LOG.md) | ADR, incluidas las decisiones descartadas y por qué. |
 | [docs/MANUAL_DE_DESARROLLO.md](docs/MANUAL_DE_DESARROLLO.md) | Guía de desarrollo y comandos. |
+| [server/README.md](server/README.md) | Backend opcional (plan B, ADR-022) con yt-dlp. |
 
 ## Estado
 
 - Build: **verde** (`./gradlew :app:assembleDebug`)
-- Tests: **118 unitarios + 12 instrumentados, en verde**
+- Tests: **155 unitarios + 12 instrumentados, en verde**
 - APK debug: 23 MB
 - Verificado en dispositivo real (Android 16): búsqueda, paginación, hoja de
   calidad hasta 2160p, descarga de 1080p completa y unión **sin recodificar**
   (archivo final 1,0006x las partes, perfil y bitrate intactos).
 - El bloqueo de YouTube por acceso anónimo está **resuelto con cookies de
   sesión**; no hace falta servidor.
+- **Plan B opcional** (ADR-022): un servidor propio con yt-dlp (`server/`),
+  activable con un interruptor en Ajustes si algún día el extractor local deja
+  de bastar. Apagado por defecto.
 
 ## Arranque rápido
 
@@ -71,15 +75,17 @@ Por eso la app admite un `cookies.txt` exportado de tu navegador con la sesión
 de YouTube iniciada:
 
 ```bash
-adb push cookies.txt /sdcard/Android/data/com.elimd.downloader/files/cookies.txt
+# Guarda el fichero FUERA del repo (es una credencial) y empújalo al móvil:
+adb push ~/cookies-a-donwloader.txt /sdcard/Android/data/com.elimd.downloader/files/cookies.txt
 adb shell am force-stop com.elimd.downloader
 adb logcat -s YouTubeSession:*   # debe decir "Sesion cargada ... N cookies"
 ```
 
 **Detalles que importan:**
 
-- `cookies.txt` está en `.gitignore`. **Nunca** lo comitees: es una credencial
-  de tu cuenta.
+- `cookies.txt` está en `.gitignore` y **no debe vivir en el repo**. La copia de
+  trabajo está en `~/cookies-a-donwloader.txt`, fuera del árbol. **Nunca** lo
+  comitees: es una credencial de tu cuenta.
 - Las cookies **solo se envían a hosts de YouTube**, nunca al CDN
   `googlevideo.com` donde bajan los medios. Hay tests que lo comprueban.
 - Si el fichero no trae cookies de sesión reales, la app lo ignora y sigue en
@@ -89,7 +95,7 @@ adb logcat -s YouTubeSession:*   # debe decir "Sesion cargada ... N cookies"
 ## Pruebas
 
 ```bash
-./gradlew :app:testDebugUnitTest        # 118 unitarios en la JVM (rápido)
+./gradlew :app:testDebugUnitTest        # 145 unitarios en la JVM (rápido)
 ./gradlew :app:assembleDebugAndroidTest # compilar los instrumentados
 ./gradlew :app:connectedDebugAndroidTest # 12 instrumentados, necesitan dispositivo
 ```

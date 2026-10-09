@@ -35,4 +35,14 @@ google-services.json
 
 # Cookies y tokens locales
 cookies.txt
-tokengit
+# Antes decía "tokengit" (typo): no excluía nada, así que un token.txt o un
+# token.json acababan en el repo. El comodín cubre ambos.
+token*
+
+# Memoria local de herramientas (Engram)
+.engram/
+
+# Python (servidor del plan B)
+__pycache__/
+*.pyc
+.venv/

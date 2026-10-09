@@ -408,3 +408,162 @@ que ninguna sesión futura vuelva a proponerlo.
 - **Fecha**: 2026-10-02
 - **Decisión**: Usar Foreground Service + Notificación para descargas en background.
 - **Justificación**: Permite al usuario monitorear descargas y cancelarlas desde la barra de notificaciones.
+
+---
+
+## ADR-020: El foreground service lo arranca el motor y se apaga solo
+- **Fecha**: 2026-10-07
+- **Decisión**: `DownloadEngineImpl` inyecta `@ApplicationContext` y arranca
+  `DownloadService` en `launchDownload` (punto común a `startDownload`,
+  `resume` y `retry`). El servicio inyecta el motor, observa `progressFlow` y
+  decide: progreso mientras haya descargas trabajando; anuncio de resultado y
+  `stopSelf` cuando el motor queda vacío. La decisión pura vive en
+  `DownloadServicePolicy.kt`, sin imports de Android.
+- **Alternativas consideradas**:
+  - Arrancarlo desde `DownloadRepositoryImpl` (ya tenía `Context`): duplica el
+    arranque en `resume` y mete un servicio Android en la capa `data`.
+  - Enlazar al servicio desde la UI (`bindService`): la app puede no estar en
+    pantalla, que es justo el caso de uso.
+  - WorkManager: reintenta y persiste, pero no puede mantener una notificación
+    de progreso continua mientras transfiere bytes.
+- **Justificación**: con el servicio desconectado (P5) cualquier descarga
+  moría con el proceso y, con multiplexado, una descarga larga en background
+  se quedaba a medias sin avisar. `launchDownload` es el único punto por el
+  que pasa todo el trabajo nuevo, así que el servicio no puede quedar sin
+  arrancar; el criterio de parada sale del propio motor (entradas activas), no
+  de la UI. Mantener la política fuera del servicio permite probarla en la
+  JVM: 10 tests en `DownloadServicePolicyTest`.
+- **Nota**: `DownloadEngineProgress` gana `fileName` y `error` para que la
+  notificación (que vive fuera de la app y no puede leer Room) sepa qué fichero
+  falló y por qué; de paso, la columna `error` de Room por fin se rellena
+  desde el motor.
+
+## ADR-021: Endurecer la superficie de seguridad (C4 de la auditoría)
+- **Fecha**: 2026-10-09
+- **Decisión**: cuatro cambios independientes sobre la misma idea ("lo que
+  viene de fuera no se usa a ciegas"):
+  1. **Credencial fuera del árbol**: `cookies.txt` se mueve de la raíz del repo
+     a `~/cookies-a-donwloader.txt`. Sigue en `.gitignore`, pero además deja de
+     estar físicamente en el directorio de trabajo.
+  2. **`DEBUG_PATHS = BuildConfig.DEBUG`**: el diagnóstico de
+     `playabilityStatus` solo se registra en depuración.
+  3. **`ACTION_VIEW` defendido** en `DownloadsScreen`: `catch
+     (ActivityNotFoundException)` con log y aviso al usuario (complementa
+     ADR-009).
+  4. **`sanitizeVideoId`** (`core/common/VideoId.kt`): valida la forma del id de
+     YouTube (`[A-Za-z0-9_-]{1,64}`) antes de usarlo como nombre de fichero o
+     trozo de URL; si no encaja, la miniatura se omite.
+- **Alternativas consideradas**:
+  - Dejar `cookies.txt` en el repo confiando en `.gitignore`: protege el commit,
+    pero no un `cp -r`, un backup ni una captura. Insuficiente.
+  - Mover el fichero a `files/` dentro del repo: no resuelve nada, sigue
+    estando en el árbol.
+  - `DEBUG = true` con un flag manual: una rama que alguien olvidará cambiar en
+    release; `BuildConfig.DEBUG` es el propio compilador.
+  - `runCatching` genérico alrededor del `startActivity`: prohibido por `r3.md`
+    (oculta también fallos reales); se captura la excepción concreta.
+  - "Arreglar" el `videoId` en vez de rechazarlo: un id reparado apunta a otro
+    vídeo; devolver `null` es la respuesta honesta.
+- **Justificación**: son los hallazgos C4 de la auditoría del 2026-10-05. El
+  repo no tenía fugas activas, pero tenía una credencial en el árbol y tres
+  usos de datos de red sin validar. Ninguno cuesta rendimiento; todos eliminan
+  formas de fallo que no dependen de que el código de arriba siga portándose
+  bien.
+- **Verificado**: `./gradlew :app:testDebugUnitTest :app:assembleDebug` →
+  **BUILD SUCCESSFUL, 145 tests, 0 fallos** (8 nuevos de `VideoIdTest`).
+
+---
+
+## ADR-022: Backend remoto opcional (plan B) activable a demanda — C5
+- **Fecha**: 2026-10-09
+- **Contexto**: C5 de la auditoría. `server/` era andamiaje muerto. El
+  `NewPipeMediaResolver` local es la ruta por defecto y gratis, pero cuando
+  YouTube reta la IP (bloqueo "Sign in to confirm you're not a bot") deja de
+  funcionar. El plan B es un servidor propio con `yt-dlp` detrás de la **misma**
+  interfaz `MediaResolver` (costura ya prevista en ADR-012), activable con un
+  interruptor para no imponer coste ni proceso a quien no lo use.
+- **Decisión**:
+  1. **Contrato API REST** entre app y servidor (ver §Contrato). El servidor
+     entrega metadatos y **sirve los bytes del medio ya muxeado**; no devuelve
+     URLs firmadas de `googlevideo`, que están atadas a la IP que las pidió y
+     fallarían (403) al bajarlas desde el móvil.
+  2. **El servidor muxea**. `resolveStream` devuelve un único MP4 (video+audio
+     unidos con ffmpeg) o un M4A. Así `DownloadEngineImpl.needsJoining()`
+     (línea 327) toma la rama `downloadSingle` y el móvil solo baja un archivo
+     con `HttpFileDownloader` (paralelo por segmentos + reanudable por Range).
+  3. **Selección de backend**: nuevo `SwitchingMediaResolver` (implementa
+     `MediaResolver`) que lee en cada llamada si el interruptor está encendido
+     y delega en `NewPipeMediaResolver` (local) o `ServerMediaResolver`
+     (remoto). Es el binding sin cualificar de `MediaResolver`; los dos backends
+     se inyectan con los qualifiers `@LocalResolver`/`@RemoteResolver`.
+  4. **Calidades honestas**: la escalera de calidades sale de los formatos
+     reales que `yt-dlp` obtiene en ese servidor; no se recorta ni se asume
+     ningún techo. Si una calidad pedida no está disponible, el servidor
+     responde error explícito (no entrega otra calidad en su lugar), coherente
+     con `StreamSelection.Plan.None`.
+  5. **Sin sustitución silenciosa**: en modo servidor, un fallo del servidor se
+     propaga (r3). No hay fallback mágico a local que oculte la causa.
+- **Alternativas consideradas (todas OSS/gratuitas)**:
+  - **`http.server` de la stdlib** (lo que usa el proyecto de referencia):
+    suficiente, pero sin validación de esquema, sin OpenAPI y con manejo de
+    Range/streaming manual. Descartado como base; se reutiliza su *conocimiento*
+    (orden de `player_client`, proxy, cookies), no su código.
+  - **FastAPI + uvicorn**: tipado con Pydantic, validación de entrada y
+    OpenAPI autogenerado (`/docs`) para poder probar el contrato desde el
+    navegador. Elegido.
+  - **Flask**: síncrono y sin validación nativa; menos adecuado para el
+    patrón `ensure-then-serve` (descarga bloqueante en un hilo).
+  - **Node/Express**: obligaría a un segundo ecosistema; el de referencia ya
+    es Python y `yt-dlp` es Python.
+  - **Devolver URLs directas de `googlevideo`** (y bajar desde el móvil): la
+    URL va firmada con la IP del que la pidió; desde otra IP da 403. Descartado
+    tras el análisis (endurece la app a un fallo garantizado).
+  - **Servir por streaming chunked sin Range** (como la referencia): obliga a
+    descarga secuencial, sin reanudar y sin progreso con tamaño conocido. Se
+    materializa y se sirve con Range: progreso real y paralelismo.
+- **Superar el techo de 360p (medido, no asumido)**: la referencia
+  (`continuarv4.md`) atribuía el techo de 360p a la IP de datacenter y proponía
+  `mweb` para abrir la escalera. La medición del 2026-10-09 en este entorno
+  **corrige ese diagnóstico**: la palanca es el **PO token**, no la IP ni el
+  cliente. Sin PO token, *ningún* cliente pasa de **itag 18 (360p)**, ni con
+  cookies. Con PO token (bgutil) + `player_client=default` aparece la escalera
+  completa hasta **4K**; `mweb` de hecho **falla** con PO token
+  ("enumerate_adapters"). El servidor por tanto:
+  - usa `default` como primer cliente (`DEFAULT_VIDEO_CLIENTS`), no `mweb`,
+  - soporta el PO token por `YT_PO_TOKEN`, `YTDLP_POT_SCRIPT` (modo script con
+    Node) o `YTDLP_POT_BASEURL` (sidecar `brainicism/bgutil-ytdlp-pot-provider`),
+  - acepta **proxy residencial por entorno** (`YTDLP_PROXY`) y cookies
+    (`POST /api/cookies` o `YTDLP_COOKIES`) como refuerzo,
+  - y reporta en `/api/health` qué palancas hay activas, para diagnosticar en
+    vez de adivinar. El techo se **mide** en cada despliegue, no se fija.
+- **Contrato API** (JSON salvo el medio):
+  - `GET /api/health` → estado, versión, `yt_dlp`, `cookies`, `proxy`.
+  - `POST /api/cookies` (cuerpo con el `cookies.txt` Netscape) / `DELETE`.
+  - `GET /api/search?q=&page=` → `{query, videos[], nextPage, hasNextPage}`.
+  - `GET /api/video/{id}` → `YouTubeVideoDTO`.
+  - `GET /api/qualities/{id}` → `[QualityDTO]` (escalera real).
+  - `GET /api/related/{id}` → **501** (yt-dlp no los ofrece; el cliente los
+    delega a local, que es barato y no necesita red del servidor).
+  - `GET /api/media/{id}?quality=&type=video|audio` → bytes, con
+    `Accept-Ranges: bytes` y soporte `Range`/206. Materialización con caché en
+    disco y lock por clave para que la sonda `Range: bytes=0-0` de
+    `HttpFileDownloader` y los 4 segmentos no repitan la descarga.
+- **Formato de id de calidad** (estable y legible, no itag): `best`,
+  `v:<height>:<fps>` (fps 0 si no aplica), `a:<kbps>`.
+- **Consecuencias**:
+  - Añade dependencias de runtime al servidor (`fastapi`, `uvicorn[standard]`,
+    `yt-dlp`), todas MIT/Unlicense. La app NO añade dependencias: usa
+    `kotlinx.serialization` y `OkHttp` ya presentes.
+  - El interruptor está **apagado por defecto**: sin servidor configurado la
+    app se comporta exactamente como hoy.
+  - `server/` deja de ser andamiaje: se versiona con `requirements.txt`,
+    `Dockerfile` y `tests/`.
+- **Verificado (2026-10-09)**:
+  - Android: `./gradlew :app:testDebugUnitTest :app:assembleDebug` → **BUILD
+    SUCCESSFUL, 155 tests, 0 fallos** (incluye `ServerMediaResolverTest`,
+    `SwitchingMediaResolverTest`).
+  - Servidor: `python3 -m unittest discover -s tests -t .` → **30 tests OK**;
+    verificado E2E en local (health, search, escalera completa con PO token,
+    `Range` 206 + caché, ffprobe H.264+AAC).
+- **Pendiente**: despliegue real (requiere `gh auth login` y `railway login`
+  del usuario; `docker` no está instalado localmente).

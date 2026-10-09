@@ -12,7 +12,8 @@
 - **Android SDK** (API 21+). Ruta por defecto en este equipo:
   `/home/elimdavid/Android/Sdk`, declarada en `local.properties` (no versionado).
 - **Gradle**: se gestiona con el wrapper. No hace falta instalarlo aparte.
-- **yt-dlp**: **no se necesita.** Ver ADR-005.
+- **yt-dlp**: **no se necesita en el dispositivo.** Ver ADR-005. El plan B lo
+  usa **en el servidor** (`server/`), no en la app (ADR-022).
 
 ## Comandos de Terminal
 
@@ -30,6 +31,22 @@ cd "/home/elimdavid/a. donwloader/"
 
 Se recomienda usar las tareas con scope `:app:` en lugar de `build`, que
 ejecuta todos los módulos y variants.
+
+### Backend del plan B (`server/`)
+
+El servidor es un proyecto Python aparte; no participa del build de Gradle.
+
+```bash
+cd "/home/elimdavid/a. donwloader/server"
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python3 -m unittest discover -s tests -t .   # 30 tests del núcleo puro
+uvicorn app.main:app --reload                # servidor en http://127.0.0.1:8000
+```
+
+Sin PO token YouTube solo entrega 360p (itag 18); con él aparece la escalera
+completa hasta 4K. Ver `server/README.md` para desplegar en Railway y aportar el
+PO token (`YT_PO_TOKEN`, `YTDLP_POT_SCRIPT` o `YTDLP_POT_BASEURL`).
 
 ### Tests instrumentados
 
@@ -68,7 +85,9 @@ devuelve `LOGIN_REQUIRED` a cualquier cliente. Ver `ESTADO_PROYECTO.md` §5.
 
 ```bash
 # Exportar cookies.txt del navegador (extensión "Get cookies.txt LOCALLY")
-adb push cookies.txt /sdcard/Android/data/com.elimd.downloader/files/cookies.txt
+# y guardarlo FUERA del repo: es una credencial. Esta copia de trabajo vive en
+# ~/cookies-a-donwloader.txt (movida fuera del árbol el 2026-10-09).
+adb push ~/cookies-a-donwloader.txt /sdcard/Android/data/com.elimd.downloader/files/cookies.txt
 adb shell am force-stop com.elimd.downloader
 adb logcat -s YouTubeSession:*
 ```
@@ -79,7 +98,9 @@ Se buscan en este orden, y se usa el primero que exista:
 2. `filesDir/cookies.txt`
 3. `filesDir/session/cookies.txt`
 
-**Nunca** se comitean: ya están en `.gitignore`.
+**Nunca** se comitean: ya están en `.gitignore`, y la copia de trabajo se
+mantiene fuera del árbol de trabajo para que ni un `cp -r` ni un backup la
+arrastren.
 
 ### NewPipeExtractor (opcional, para depurar en la JVM)
 Al ser Java puro, se puede ejercitar fuera de Android:
@@ -138,8 +159,12 @@ permite testearlo en la JVM sin dispositivo. `feature` depende de `domain` y
 ### Core Layer
 - **MediaResolver** (`core/extract`): interfaz, la frontera del motor de
   descarga. Punto de extensión para el plan B.
-- **NewPipeMediaResolver**: implementación actual sin servidor. Fuerza el
-  cliente iOS de InnerTube.
+- **SwitchingMediaResolver**: binding activo de `MediaResolver`. Lee el ajuste
+  `useRemoteServer` en cada llamada y enruta al backend local o remoto (ADR-022).
+- **NewPipeMediaResolver**: extractor local sin servidor. Fuerza el cliente iOS
+  de InnerTube. Inyectado como `@LocalResolver`.
+- **ServerMediaResolver**: plan B contra el backend `server/` con yt-dlp.
+  Devuelve un único archivo ya muxeado; inyectado como `@RemoteResolver`.
 - **StreamSelection**: la política de qué stream sirve para cada petición.
   Sin dependencias del extractor, se prueba en la JVM (ADR-015).
 - **OkHttpNewPipeDownloader**: puente HTTP que el extractor necesita.
@@ -184,9 +209,68 @@ permite testearlo en la JVM sin dispositivo. `feature` depende de `domain` y
   `media3-exoplayer` existe, `media3-player` **no** (devuelve 404).
 
 ### Antes de tocar el esquema de Room
-`version = 1` y `exportSchema = false`. Si añades columnas, **activa
-`exportSchema` y escribe la migración primero**, o perderás los datos del
-usuario. Ver `ESTADO_PROYECTO.md` P7.
+`version = 2` (con `MIGRATION_1_2` registrada en `AppModule`) y
+`exportSchema = false`. Si añades columnas, **activa `exportSchema` y escribe
+la migración primero**, o perderás los datos del usuario y Room no podrá
+validarla. Ver `ESTADO_PROYECTO.md` P7.
+
+## Bugs Resueltos y Lecciones Aprendidas
+
+### 2026-10-09 — Superficie de seguridad (C4 de la auditoría)
+- `cookies.txt` con la sesión real vivía en la **raíz del repo**. No estaba en
+  git (ya lo excluía `.gitignore`), pero seguía en el árbol de trabajo: un
+  `cp -r`, un backup o una captura lo habrían filtrado. Se **movió fuera del
+  árbol** a `~/cookies-a-donwloader.txt`.
+- `DEBUG_PATHS = true` estaba fijo en `OkHttpNewPipeDownloader`: en release
+  seguía escribiendo en logcat el `playabilityStatus` de cada petición. Ahora es
+  `BuildConfig.DEBUG`, y la decisión la toma el compilador.
+- `startActivity(ACTION_VIEW)` en `DownloadsScreen` iba sin red: sin
+  reproductor instalado, **crash**. Ahora `catch (ActivityNotFoundException)`
+  con log y aviso.
+- El `videoId` que llega de la red se usaba tal cual como nombre de fichero de
+  la miniatura. Era seguro "por accidente" (un regex aguas arriba), así que se
+  añadió `sanitizeVideoId` (`core/common/VideoId.kt`): solo pasa
+  `[A-Za-z0-9_-]{1,64}`; cualquier otra forma se descarta antes de tocar el
+  sistema de ficheros o la URL. 8 tests en `VideoIdTest`.
+- **Lección**: "está en `.gitignore`" no es lo mismo que "no está en el árbol".
+  El `.gitignore` protege el commit, no el `cp -r`. Una credencial en el
+  directorio de trabajo está a un backup de distancia de un incidente; sacarla
+  del árbol es la única garantía real. Y una entrada de red nunca se convierte
+  en ruta o URL sin validar su forma.
+
+### 2026-10-07 — Ajustes que no hacían nada (C3 de la auditoría)
+- "Descargas concurrentes máximas" se guardaba en Room y el motor **nunca lo
+  leía**: con el límite en 1 seguían yendo 4 descargas en paralelo. Ahora
+  cada job espera su hueco (`DownloadSlots`, contador con CAS) antes de
+  resolver la URL, releyendo el límite en cada intento; mientras espera su
+  estado es `QUEUED` y la notificación no miente.
+- Tres `onClick = { }` vacíos en `SettingsScreen`: "Ubicación de descarga"
+  se **eliminó** (nadie consumía `downloadLocation` y no había selector: la
+  fila prometía lo que no ocurre); "Versión" y "Acerca de" son ahora filas
+  informativas no pulsables, y la versión sale de `BuildConfig.VERSION_NAME`
+  (habilitado `buildFeatures.buildConfig`) en vez de un `"1.0.0"` hardcodeado
+  que habría quedado mentiroso con la primera actualización.
+- **Lección**: un ajuste que no lee nadie es una mentira en la UI, igual que
+  una excepción silenciada: si aún no se implementa, no se muestra — o se
+  marca como pendiente. Y no hardcodear la versión en la UI: es el dato que
+  más garantía de desincronización tiene.
+
+### 2026-10-07 — Excepciones silenciadas (C2 de la auditoría)
+- `MainViewModel.observeDownloads` tenía `.catch { }` vacío: si el Flow de
+  Room fallaba, la lista de descargas se congelaba para siempre sin log.
+  Ahora: `Log.e` + snackbar. Igual el catch de `observeSettings`, que quitaba
+  el indicador de carga sin registrar nada.
+- `NewPipeMediaResolver.getRelatedVideos` devolvía `emptyList()` vía
+  `runCatching` en cualquier fallo: "0 relacionados" parecía un resultado.
+  Ahora log + rethrow, como `getVideoInfo` en el mismo fichero.
+- `YouTubeSearchDataSourceImpl.downloadThumbnail` usaba `runCatching`, que se
+  traga **cualquier `Throwable`** (incluido `OutOfMemoryError` de
+  `body.bytes()`) sin log. Ahora `catch (e: Exception)` con `Log.w`.
+- **Lección**: `runCatching` + `getOrDefault/getOrNull` es el formato favorito
+  de las excepciones silenciadas: compila limpio y no molesta hasta que el
+  usuario ve un dato falso. `r3.md` lo prohíbe; si el fallo es cosmético
+  (miniatura), se registra y se devuelve `null`; si cambia el significado del
+  dato (relacionados, descargas), se propaga.
 
 ## Próximos Pasos
 Ver `ESTADO_PROYECTO.md` §8 para el detalle.
@@ -198,9 +282,9 @@ Ver `ESTADO_PROYECTO.md` §8 para el detalle.
 - [ ] **P3 (Media)**: Reproductor propio con Media3 (`feature/player`).
 - [ ] **P4 (Media)**: Tests de `HttpFileDownloader` (Range/pausa) con
       `MockWebServer`, y de use cases con MockK.
-- [ ] **P5 (Media)**: Conectar `DownloadService` al motor para descargas en
-      segundo plano. Ahora importa más: unir pistas tarda, y sin servicio una
-      descarga larga se corta al salir de la app.
+- [x] **P5 (Media)**: Conectar `DownloadService` al motor para descargas en
+      segundo plano (hecho 2026-10-07, ADR-020: el motor lo arranca en
+      `launchDownload` y el servicio se cierra cuando no queda nada activo).
 - [ ] **P6 (Baja)**: Fondo de pantalla (`WallpaperManager`).
 - [ ] **P7 (Baja)**: Migraciones de Room y velocidad real.
 - [ ] **P8 (Baja)**: Reducir dependencia de JitPack.

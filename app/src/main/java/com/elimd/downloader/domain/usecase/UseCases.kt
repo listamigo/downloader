@@ -216,6 +216,18 @@ class UpdateWallpaperSourceUseCase @Inject constructor(
     suspend operator fun invoke(source: String) = repository.updateWallpaperSource(source)
 }
 
+class UpdateUseRemoteServerUseCase @Inject constructor(
+    private val repository: SettingsRepository
+) {
+    suspend operator fun invoke(enabled: Boolean) = repository.updateUseRemoteServer(enabled)
+}
+
+class UpdateServerUrlUseCase @Inject constructor(
+    private val repository: SettingsRepository
+) {
+    suspend operator fun invoke(url: String) = repository.updateServerUrl(url)
+}
+
 class ClearAllSettingsUseCase @Inject constructor(
     private val repository: SettingsRepository
 ) {

@@ -66,24 +66,33 @@ dependencias de Android, lo que permite testearlo en la JVM.
 
 ## La frontera `MediaResolver` (decisión arquitectónica clave)
 
-El punto de extensibilidad del que todo depende:
+El punto de extensibilidad del que todo depende. El binding sin cualificar
+apunta al conmutador; los dos backends se inyectan con qualifiers (ADR-022):
 
 ```
 MediaResolver (interfaz, en core/extract)
-├── NewPipeMediaResolver   <- implementación actual, sin servidor
-└── ServerMediaResolver    <- plan B: servidor propio con yt-dlp
+└── SwitchingMediaResolver   <- binding activo; elige por operación
+    ├── @LocalResolver  NewPipeMediaResolver   <- extractor local, sin servidor
+    └── @RemoteResolver ServerMediaResolver    <- plan B: servidor propio con yt-dlp
 ```
 
 - **`NewPipeMediaResolver`**: NewPipeExtractor (Java puro, el mismo que usa la
   app NewPipe en producción) + OkHttp. Descifra las URLs firmadas de YouTube con
   Rhino como motor JavaScript. No requiere servidor ni binario nativo. Fuerza el
   cliente **iOS** de InnerTube, que expone muchos más formatos que el de Android.
-- **`ServerMediaResolver`**: delega en un servidor propio con yt-dlp, útil
-  porque yt-dlp se actualiza antes y usa clientes de InnerTube distintos, con
-  menor probabilidad de bloqueo.
+- **`ServerMediaResolver`**: delega en un servidor propio con yt-dlp (ver
+  `server/` y ADR-022), útil porque yt-dlp se actualiza antes y usa clientes de
+  InnerTube distintos, con menor probabilidad de bloqueo. El servidor entrega
+  **un único archivo ya muxeado** (MP4 para vídeo, M4A para audio), así que
+  `resolveStream` devuelve una sola URL y el cliente solo baja bytes con `Range`.
+- **`SwitchingMediaResolver`**: lee el ajuste `useRemoteServer` en **cada
+  llamada** y enruta al backend elegido. No hay fallback silencioso entre ellos:
+  si el modo elegido falla, el error sube tal cual. Los *relacionados* son la
+  única excepción: siempre salen del extractor local (el servidor no los
+  ofrece).
 
-Añadir el plan B es **un único cambio de binding en `AppModule`**: ni dominio
-ni presentación se ven afectados.
+Activar el plan B no toca dominio ni presentación: solo el ajuste en
+`SettingsScreen` y la URL del servidor.
 
 **Limitación conocida**: sin cookies de sesión, YouTube bloquea con
 `SignInConfirmNotBotException` la mayoría de vídeos. La causa no es el cliente de
@@ -166,9 +175,11 @@ MediaResolver.resolveStream()  ->  ResolvedMedia (videoUrl + audioUrl)
 
 ## Notificaciones
 `DownloadService` es un foreground service con canales y
-`FOREGROUND_SERVICE_TYPE`. **Pendiente**: el motor de descarga todavía no lo
-arranca, así que hoy no hay descarga real en segundo plano. Ver
-`ESTADO_PROYECTO.md` P5.
+`FOREGROUND_SERVICE_TYPE`. Lo arranca `DownloadEngineImpl` en cada
+`launchDownload` y el servicio se cierra cuando el motor no tiene nada
+activo: progreso mientras descarga, aviso de resultado al terminar. La
+decisión vive en `DownloadServicePolicy.kt` (sin imports de Android, testeable
+en la JVM). Ver `ESTADO_PROYECTO.md` P5 y ADR-020.
 
 ## Persistencia
 - **Room**: descargas, estados y progreso.
@@ -198,7 +209,7 @@ Las cookies nunca se registran en el log ni se comitean (`.gitignore`).
 ## Testing
 - **Unitarios** (JVM, sin dispositivo): sanitización de respuestas, nombres de
   fichero, MIME, path traversal, **política de selección de calidad** y **decisión
-  de ruta del muxer**. 118 tests en verde.
+  de ruta del muxer**. 145 tests en verde.
 - **Instrumentados** (`androidTest`, necesitan dispositivo): `Mp4RemuxerTest`
   (6) y `MediaMuxerTest` (6), 12 tests. Lo importante no es que haya pistas, sino
   que **no se pierda nada ni se cambie el formato**: se comparan muestras y bytes
