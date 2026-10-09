@@ -21,6 +21,15 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // URL del backend "plan B" (ADR-022). Embebida para que activar el
+        // interruptor de Ajustes baste: no hay que escribir la URL a mano.
+        // Se puede sobreescribir con -PserverUrl=... o una variable de entorno.
+        buildConfigField(
+            "String",
+            "DEFAULT_SERVER_URL",
+            "\"${findProperty("serverUrl") ?: "https://downloader-production-5faa.up.railway.app"}\""
+        )
     }
 
     buildTypes {

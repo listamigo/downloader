@@ -74,6 +74,7 @@ async def health() -> HealthDTO:
         poToken=probe["poToken"],
         potScript=probe["potScript"],
         potBaseurl=probe["potBaseurl"],
+        impersonate=probe["impersonate"],
         cacheDir=str(settings.cache_dir),
         cacheTtlSeconds=settings.cache_ttl_seconds,
     )

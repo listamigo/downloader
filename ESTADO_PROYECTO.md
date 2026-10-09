@@ -885,6 +885,18 @@ proyecto de referencia:
   activado por qualifiers `@LocalResolver`/`@RemoteResolver` en `AppModule`.
   UI en `SettingsScreen` (switch + URL del servidor).
 
+**Contra el reto bot en Railway (2026-10-09):** YouTube lanza "Sign in to
+confirm you're not a bot" a las IPs de datacenter. El servidor ahora ejecuta
+todo con **impersonación de navegador** curl-cffi (plan `YTDLP_IMPERSONATE`,
+def. `chrome`, con reintento sin impersonar como respaldo); `/api/health` la
+reporta. Si aun así apareciese, la palanca queda en `POST /api/cookies`.
+
+**URL embebida (2026-10-09):** el backend por defecto viaja en el APK
+(`BuildConfig.DEFAULT_SERVER_URL`, sobreescribible con `-PserverUrl=...`),
+provisto por DI (`@DefaultServerUrl` en `AppModule`). `ServerMediaResolver`
+cae a esa URL cuando el ajuste `serverUrl` está vacío: **activar el switch de
+Ajustes basta**, sin escribir la URL a mano. Escribir una URL siempre gana.
+
 **Hallazgo de calidad (medido, supera la conclusión previa):** sin PO token
 YouTube solo entrega **itag 18 (360p)**, ni con cookies ni cambiando
 `player_client`. Con PO token (bgutil) + `player_client=default` aparece la

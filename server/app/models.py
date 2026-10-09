@@ -48,6 +48,7 @@ class HealthDTO(BaseModel):
     poToken: bool
     potScript: bool
     potBaseurl: bool
+    impersonate: list[str] = []
     cacheDir: str
     cacheTtlSeconds: int
 

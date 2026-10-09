@@ -38,13 +38,16 @@ Documentación interactiva en `/docs`.
 | `YTDLP_POT_BASEURL` | URL del proveedor bgutil por HTTP (modo sidecar). |
 | `VIDEO_CLIENTS` / `SEARCH_CLIENTS` | Orden de `player_client` (def. `default` primero). |
 
-> **Calidad medida (2026-10-09):** sin PO token, YouTube solo entrega **itag 18
-> (360p)**, ni con cookies ni cambiando de `player_client`. Con PO token (bgutil)
-> y cliente `default`, aparece la **escalera completa hasta 4K**. Por eso el PO
-> token es la palanca real, no la IP. Comprueba con `/api/health` y
-> `/api/qualities`.
+> **Calidad medida (2026-10-09):** el techo **depende del entorno**, no de una
+> regla fija. El mismo código, sin PO token, en una red local daba solo **itag 18
+> (360p)**; en el datacenter de Railway, **sin PO token, proxy ni cookies**,
+> devuelve la **escalera completa hasta 2160p** (verificado: 720p y 144p se
+> descargan y muxean). Por eso el servidor **no asume techo**: publica la
+> escalera real de su entorno vía `/api/qualities`. El PO token (bgutil) y el
+> proxy (`YTDLP_PROXY`) son palancas **opcionales** para cuando el entorno SÍ
+> esté capado. Comprueba `/api/health` y `/api/qualities`.
 >
-> **PO token en producción** (elige una):
+> **PO token (opcional, solo si tu entorno está capado)** (elige una):
 > - **Sidecar (recomendado):** despliega la imagen
 >   `brainicism/bgutil-ytdlp-pot-provider` como segundo servicio y pon
 >   `YTDLP_POT_BASEURL=http://<servicio>:4416`.
@@ -55,9 +58,11 @@ Documentación interactiva en `/docs`.
 ## Despliegue en Railway
 
 1. Crea un proyecto y conecta el repo `listamigo/downloader`.
-2. **Root Directory = `server`** (es un monorepo; la app Android está en `app/`).
-3. (% opcional) Añade las variables de la tabla (VPN/Proxy, cookies, PO token).
-4. Railway detecta `railway.json` + `Dockerfile` y despliega.
+2. **Build → Builder = `Dockerfile`** y **Dockerfile Path = `Dockerfile`** (raíz).
+   Alternativa en monorepo: **Settings → Source → Root Directory = `server`**.
+   Si no, Railway usa Railpack y detecta el Gradle Android de la raíz: falla.
+3. (% opcional) Añade las variables de la tabla (proxy, cookies, PO token).
+4. Railway usa `railway.json` + `Dockerfile` y despliega.
 5. Comprueba `https://<host>/api/health`.
 
 ## Local

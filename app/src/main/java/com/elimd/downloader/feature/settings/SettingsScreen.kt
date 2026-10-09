@@ -256,19 +256,29 @@ fun ServerUrlField(
     // El valor vive en un estado local para que escribir no dependa del ritmo
     // con que DataStore reemite el flow; cada tecla se persiste igual.
     var input by remember(url) { mutableStateOf(url) }
-    OutlinedTextField(
-        value = input,
-        onValueChange = {
-            input = it
-            onUrlChange(it)
-        },
-        label = { Text("URL del servidor") },
-        placeholder = { Text("https://tu-servidor.up.railway.app") },
-        singleLine = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    )
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        OutlinedTextField(
+            value = input,
+            onValueChange = {
+                input = it
+                onUrlChange(it)
+            },
+            label = { Text("URL del servidor (opcional)") },
+            placeholder = { Text("vacío = ${BuildConfig.DEFAULT_SERVER_URL}") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = if (input.isBlank()) {
+                "Se usará el servidor integrado: ${BuildConfig.DEFAULT_SERVER_URL}"
+            } else {
+                "URL personalizada"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

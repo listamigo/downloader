@@ -1,5 +1,6 @@
 package com.elimd.downloader.core.extract
 
+import com.elimd.downloader.core.di.DefaultServerUrl
 import com.elimd.downloader.domain.model.DownloadQuality
 import com.elimd.downloader.domain.model.DownloadType
 import com.elimd.downloader.domain.model.SearchResult
@@ -29,7 +30,8 @@ import okhttp3.Request
  */
 class ServerMediaResolver @Inject constructor(
     private val client: OkHttpClient,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    @DefaultServerUrl private val builtInServerUrl: String
 ) : MediaResolver {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -99,8 +101,18 @@ class ServerMediaResolver @Inject constructor(
         }
     }
 
+    /**
+     * La URL de fabricacion (inyectada via [com.elimd.downloader.core.di.DefaultServerUrl])
+     * actua como valor por defecto: activar el interruptor basta para usar el
+     * servidor desplegado sin escribir nada. Una URL guardada en ajustes gana.
+     */
     private suspend fun baseUrl(): String {
-        val url = settingsRepository.getSettings().serverUrl.trim().trimEnd('/')
+        val saved = settingsRepository.getSettings().serverUrl.trim().trimEnd('/')
+        val url = if (saved.isEmpty()) {
+            builtInServerUrl.trim().trimEnd('/')
+        } else {
+            saved
+        }
         if (url.isEmpty()) {
             throw ServerNotConfiguredException(
                 "El modo servidor esta activado pero no hay URL configurada"

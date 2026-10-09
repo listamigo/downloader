@@ -11,3 +11,8 @@ annotation class LocalResolver
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class RemoteResolver
+
+/** URL del backend "plan B" embebida en el APK como valor de fabricacion. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class DefaultServerUrl

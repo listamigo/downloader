@@ -35,6 +35,14 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(body["status"], "ok")
         self.assertIn("ytDlp", body)
 
+    def test_health_reports_impersonate_plan(self):
+        response = self._client.get("/api/health")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        # El plan por defecto impersona Chrome: es la palanca contra el reto
+        # bot que YouTube lanza a las IPs de datacenter (Railway).
+        self.assertIn("chrome", body["impersonate"])
+
     def test_related_is_not_supported(self):
         response = self._client.get("/api/related/dQw4w9WgXcQ")
         self.assertEqual(response.status_code, 501)

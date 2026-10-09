@@ -31,6 +31,10 @@ class YouTube:
         self._settings = settings
         # Mutable en caliente: `POST /api/cookies` lo actualiza sin reiniciar.
         self.cookies_file: Path | None = settings.cookies_file
+        # Impersonación ensayada por llamada: curl-cffi puede fallar para un
+        # objetivo concreto (target no soportado en la versión instalada), y
+        # ahi hay que probar el siguiente valor en vez de morir.
+        self._impersonate_plan: list[str | None] = _impersonate_plan(settings)
 
     # --- construcción de opciones -------------------------------------------------
 
@@ -70,6 +74,7 @@ class YouTube:
             "poToken": bool(self._settings.po_token),
             "potScript": bool(self._settings.pot_script),
             "potBaseurl": bool(self._settings.pot_baseurl),
+            "impersonate": list(self._settings.impersonate),
         }
 
     def search(self, query: str, page: int, page_size: int) -> tuple[list[VideoDTO], bool]:
@@ -139,6 +144,24 @@ class YouTube:
     # --- interno ------------------------------------------------------------------
 
     def _run(self, opts: dict, target: str) -> dict:
+        #curl-cffi impersona un navegador real: reduces el reto bot sin tocar nada mas.
+        last_exc: Exception | None = None
+        for impersonate in self._impersonate_plan:
+            attempt = dict(opts)
+            if impersonate:
+                attempt["impersonate"] = impersonate
+            try:
+                return self._extract(attempt, target)
+            except YouTubeError as exc:
+                last_exc = exc
+                # Solo un fallo de red/bot justifica reintentar con otra
+                # impersonacion; otros errores fallo igual con cualquier plan.
+                if not _is_retriable_bot_error(exc):
+                    raise
+        assert last_exc is not None
+        raise last_exc
+
+    def _extract(self, opts: dict, target: str) -> dict:
         try:
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(target, download=not opts.get("skip_download", True))
@@ -179,6 +202,28 @@ class YouTube:
             thumbnailUrl=str(thumb_url),
             isLive=bool(info.get("is_live") or False),
         )
+
+
+def _impersonate_plan(settings: Settings) -> list[str | None]:
+    """Plan de impersonación: valores configurados + un intento final desnudo.
+
+    El último intento sin `impersonate` garantiza que si curl-cffi no puede con
+    algo, el comportamiento anterior (sin impersonar) siga disponible como
+    respaldo en vez de morir por el plan nuevo.
+    """
+    plan: list[str | None] = [value for value in settings.impersonate if value]
+    plan.append(None)
+    return plan
+
+
+def _is_retriable_bot_error(exc: YouTubeError) -> bool:
+    message = str(exc).lower()
+    return (
+        "sign in to confirm" in message
+        or "not a bot" in message
+        or "unable to download webpage" in message
+        or "http error 4" in message
+    )
 
 
 def _candidates(formats: list[dict]) -> tuple[list[quality_mod.VideoCandidate], list[quality_mod.AudioCandidate]]:

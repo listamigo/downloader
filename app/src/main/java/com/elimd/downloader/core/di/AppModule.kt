@@ -2,6 +2,7 @@ package com.elimd.downloader.core.di
 
 import android.content.Context
 import androidx.room.Room
+import com.elimd.downloader.BuildConfig
 import com.elimd.downloader.core.database.AppDatabase
 import com.elimd.downloader.core.database.DownloadDataSourceImpl
 import com.elimd.downloader.core.datastore.DataStoreSettingsDataSource
@@ -95,6 +96,11 @@ object NetworkModule {
     @Singleton
     @RemoteResolver
     fun provideRemoteMediaResolver(impl: ServerMediaResolver): MediaResolver = impl
+
+    @Provides
+    @Singleton
+    @DefaultServerUrl
+    fun provideDefaultServerUrl(): String = BuildConfig.DEFAULT_SERVER_URL
 
     @Provides
     @Singleton

@@ -20,12 +20,15 @@ class ServerMediaResolverTest {
 
     private val client = OkHttpClient()
 
+    /** Url de fabricacion que el grafo inyecta: la que lleva el APK. */
+    private val builtInUrl = "https://built-in.example"
+
     private fun resolver(serverUrl: String = "https://server.example") =
         ServerMediaResolver(
             client = client,
-            settingsRepository = FakeSettingsRepository(AppSettings(serverUrl = serverUrl))
+            settingsRepository = FakeSettingsRepository(AppSettings(serverUrl = serverUrl)),
+            builtInServerUrl = builtInUrl
         )
-
     @Test
     fun `video devuelve una sola url y no pide mux`() = runBlocking {
         val quality = DownloadQuality(id = "v:1080:25", label = "1080p", format = "mp4", height = 1080)
@@ -69,10 +72,30 @@ class ServerMediaResolverTest {
     }
 
     @Test(expected = ServerNotConfiguredException::class)
-    fun `sin url configurada no se intenta bajar nada`(): Unit = runBlocking {
+    fun `sin url guardada ni de fabricacion no se intenta bajar nada`(): Unit = runBlocking {
         val quality = DownloadQuality(id = "best", label = "Mejor", format = "mp4")
 
-        resolver(serverUrl = "   ").resolveStream("abc", quality, DownloadType.VIDEO)
+        ServerMediaResolver(
+            client = client,
+            settingsRepository = FakeSettingsRepository(AppSettings(serverUrl = "   ")),
+            builtInServerUrl = " "
+        ).resolveStream("abc", quality, DownloadType.VIDEO)
+    }
+
+    @Test
+    fun `url vacia cae a la url de fabricacion embebida`() = runBlocking {
+        val quality = DownloadQuality(id = "best", label = "Mejor", format = "mp4")
+
+        val media = ServerMediaResolver(
+            client = client,
+            settingsRepository = FakeSettingsRepository(AppSettings(serverUrl = "")),
+            builtInServerUrl = "https://built-in.example/"
+        ).resolveStream("abc", quality, DownloadType.VIDEO)
+
+        assertEquals(
+            "https://built-in.example/api/media/abc?quality=best&type=video",
+            media.videoUrl
+        )
     }
 
     @Test
