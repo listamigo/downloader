@@ -167,6 +167,15 @@ class YouTube:
                 info = ydl.extract_info(target, download=not opts.get("skip_download", True))
         except DownloadError as exc:
             raise YouTubeError(str(exc)) from exc
+        except Exception as exc:
+            # yt-dlp puede fallar antes de envolver su error (p. ej. curl-cffi
+            # no soporta el target 'chrome' en una versión concreta): ese fallo
+            # llega como excepción cruda y antes mataba el endpoint con un 500
+            # sin detalle. Se envuelve aquí para que /api/qualities (y el resto)
+            # sigan el camino normal: YouTubeError -> plan de reintento -> 502
+            # con el mensaje real en vez de un 500 opaco.
+            logger.warning("yt-dlp fallo con %r (target=%s)", exc, target)
+            raise YouTubeError(f"{type(exc).__name__}: {exc}") from exc
         if not info:
             raise YouTubeError(f"yt-dlp no devolvió información para {target}")
         return info
