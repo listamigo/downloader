@@ -1,0 +1,15 @@
+# Contexto de build para el Dockerfile de la raíz: solo se copia server/,
+# pero no subimos al builder lo que no hace falta.
+/.git
+/.gradle
+/.engram
+/app
+/build
+**/build
+*.apk
+*.aab
+__pycache__
+*.pyc
+.venv
+token*
+cookies.txt
