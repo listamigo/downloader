@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.networking.impersonate import ImpersonateTarget
 from yt_dlp.utils import DownloadError
 from yt_dlp.version import __version__ as YTDLP_VERSION
 
@@ -162,6 +163,12 @@ class YouTube:
         raise last_exc
 
     def _extract(self, opts: dict, target: str) -> dict:
+        # El target de impersonación debe ser un ImpersonateTarget: un string
+        # plano ("chrome") atraviesa `is_supported_target` y muere en un
+        # `assert isinstance(...)` dentro de yt-dlp (verificado contra 2026.08.19).
+        if isinstance(opts.get("impersonate"), str):
+            opts = dict(opts)
+            opts["impersonate"] = ImpersonateTarget.from_str(opts["impersonate"])
         try:
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(target, download=not opts.get("skip_download", True))
