@@ -13,13 +13,25 @@ FROM python:3.12-slim
 ARG NODE_VERSION=v22.16.0
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl git xz-utils \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl git xz-utils unzip \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz" \
        -o /tmp/node.tar.xz \
     && tar -xJf /tmp/node.tar.xz -C /opt --strip-components=1 \
     && rm /tmp/node.tar.xz \
     && /opt/bin/node --version
+
+# Deno: runtime JS que yt-dlp 2026 usa (vía su componente EJS, yt_dlp_ejs) para
+# resolver los desafíos JS de YouTube cuando el PO token por sí solo no alcanza.
+# Sin un runtime JS, yt-dlp reporta "JS runtimes: none" y los "JS Challenge
+# Providers" quedan unavailable, lo que en IPs de datacenter agrava el reto
+# "Sign in to confirm you're not a bot". Queda en /opt/bin (ya en PATH).
+ARG DENO_VERSION=v2.9.7
+RUN curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
+       -o /tmp/deno.zip \
+    && unzip -q /tmp/deno.zip -d /opt/bin \
+    && rm /tmp/deno.zip \
+    && /opt/bin/deno --version
 
 ENV PATH="/opt/bin:${PATH}"
 
