@@ -26,7 +26,7 @@ from .models import (
     VideoDTO,
 )
 from .naming import safe_filename
-from .youtube import YouTube, YouTubeError
+from .youtube import VIDEO_ID_RE, YouTube, YouTubeError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("adonwloader")
@@ -100,6 +100,21 @@ async def clear_cookies() -> CookieResultDTO:
         current.unlink()
     youtube.cookies_file = None
     return CookieResultDTO(stored=False, bytes=0)
+
+
+_VIDEO_ID_RE = VIDEO_ID_RE
+
+
+@app.get("/api/debug/{video_id}")
+async def debug(video_id: str, client: str | None = Query(default=None)) -> dict:
+    """Telemetría de yt-dlp para diagnosticar el bot-check (no descarga nada).
+
+    `client` (opcional) fuerza un único `player_client`, p. ej. `web_safari`.
+    """
+    if not _VIDEO_ID_RE.match(video_id):
+        raise HTTPException(status_code=400, detail="video_id invalido")
+    clients = (client,) if client else None
+    return await _offload(youtube.diagnose, video_id, clients)
 
 
 @app.get("/api/search", response_model=SearchDTO)

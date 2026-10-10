@@ -7,6 +7,9 @@ selector) está en `quality.py`, que es puro y testeable sin red.
 from __future__ import annotations
 
 import logging
+import re
+import time
+import urllib.request
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -21,6 +24,9 @@ from .models import QualityDTO, VideoDTO
 logger = logging.getLogger("adonwloader.youtube")
 
 WATCH_URL = "https://www.youtube.com/watch?v={}"
+
+# IDs de YouTube son [A-Za-z0-9_-]; se valida antes de interpolar en la URL.
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
 
 
 class YouTubeError(RuntimeError):
@@ -85,6 +91,71 @@ class YouTube:
             "potBaseurl": bool(self._settings.pot_baseurl),
             "impersonate": list(self._settings.impersonate),
         }
+
+    def diagnose(self, video_id: str, clients: tuple[str, ...] | None = None) -> dict:
+        """Telemetría para depurar el bot-check sin volar a ciegas.
+
+        Devuelve: estado del proveedor PO (ping), la configuración efectiva, el
+        resultado de una extracción **verbose** (sin descargar) y las últimas
+        líneas de log de yt-dlp (redactadas), más señales calculadas sobre ellas
+        para saber si el plugin de PO se invocó y si pidió un token.
+        """
+        logs: list[str] = []
+
+        class _Capture:
+            def debug(self, msg) -> None:  # yt-dlp manda debug y también info aquí
+                logs.append(f"[debug] {msg}")
+
+            def info(self, msg) -> None:
+                logs.append(f"[info] {msg}")
+
+            def warning(self, msg) -> None:
+                logs.append(f"[warn] {msg}")
+
+            def error(self, msg) -> None:
+                logs.append(f"[error] {msg}")
+
+        provider = _probe_provider(self._settings.pot_baseurl)
+        opts = self._base_opts(clients or self._settings.video_clients)
+        opts.update(
+            {
+                "quiet": False,
+                "verbose": True,
+                "logger": _Capture(),
+                "skip_download": True,
+            }
+        )
+
+        result: dict = {
+            "videoId": video_id,
+            "settings": self.health(),
+            "provider": provider,
+        }
+        try:
+            info = self._run(opts, WATCH_URL.format(video_id))
+            result["status"] = "SUCCESS"
+            result["title"] = info.get("title")
+            result["formats"] = len(info.get("formats") or [])
+            heights = sorted(
+                {int(f["height"]) for f in (info.get("formats") or []) if f.get("height")}
+            )
+            result["heights"] = heights
+        except YouTubeError as exc:
+            result["status"] = "FAILED"
+            result["error"] = str(exc)
+
+        joined = "\n".join(logs)
+        lower = joined.lower()
+        result["signals"] = {
+            "providerReachable": provider.get("reachable", False),
+            "pluginMentioned": "bgutil" in lower,
+            "potProviderArgUsed": "youtubepot-bgutilhttp" in lower
+            or "youtubepot-bgutilscript" in lower,
+            "potTokenMentioned": "po_token" in lower or "po token" in lower,
+            "getPotRequested": "get_pot" in lower or "/ping" in lower,
+        }
+        result["logs"] = [_redact(line) for line in logs[-80:]]
+        return result
 
     def search(self, query: str, page: int, page_size: int) -> tuple[list[VideoDTO], bool]:
         offset = max(0, page) * page_size
@@ -238,6 +309,39 @@ def _impersonate_plan(settings: Settings) -> list[str | None]:
     plan: list[str | None] = [value for value in settings.impersonate if value]
     plan.append(None)
     return plan
+
+
+def _probe_provider(base_url: str | None) -> dict:
+    """Ping al proveedor de PO tokens para saber si responde (y si tardó)."""
+    if not base_url:
+        return {"configured": False, "reachable": False}
+    info: dict = {"configured": True, "url": base_url}
+    try:
+        started = time.time()
+        with urllib.request.urlopen(base_url.rstrip("/") + "/ping", timeout=5) as resp:
+            body = resp.read(200).decode("utf-8", "replace")
+        info.update(
+            reachable=True,
+            pingMs=int((time.time() - started) * 1000),
+            pingBody=body,
+        )
+    except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
+        info.update(reachable=False, error=f"{type(exc).__name__}: {exc}")
+    return info
+
+
+# Cookies/tokens que podrían filtrarse en un log verbose de yt-dlp.
+_SECRET_RE = re.compile(
+    r"(SID|SAPISID|APISID|HSID|SSID|ST-[A-Za-z0-9_-]+|__Secure-[A-Za-z0-9_-]+)=[^;\s\"']+",
+    re.IGNORECASE,
+)
+_LONG_RE = re.compile(r"[A-Za-z0-9_\-]{40,}")
+
+
+def _redact(line: str) -> str:
+    """Enmascara valores sensibles en una línea de log antes de exponerla."""
+    line = _SECRET_RE.sub(lambda m: m.group(1) + "=***", line)
+    return _LONG_RE.sub("***", line)
 
 
 def _is_retriable_bot_error(exc: YouTubeError) -> bool:
