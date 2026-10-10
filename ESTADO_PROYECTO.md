@@ -904,6 +904,21 @@ escalera completa hasta **4K**. El techo no es la IP: es el PO token. El
 servidor lo soporta por `YT_PO_TOKEN`, `YTDLP_POT_SCRIPT` o `YTDLP_POT_BASEURL`
 (sidecar `brainicism/bgutil-ytdlp-pot-provider`).
 
+**Corrección del wiring del PO token (2026-10-10, verificado en local):** el
+código pasaba el proveedor por el extractor-arg **deprecado**
+(`youtube:getpot_bgutil_baseurl`). Con yt-dlp 2026.08.19 + plugin 1.3.2 el plugin
+lo detecta y **lanza `PoTokenProviderRejectedRequest`** (nunca obtiene el token),
+así que el PO quedaba inerte aunque el proveedor estuviera levantado. Ahora se
+pasa por las claves **por proveedor** (`youtubepot-bgutilhttp:base_url` /
+`youtubepot-bgutilscript:server_home`). Además el proveedor bgutil (tag 1.3.2)
+viaja **embebido en la imagen** (`Dockerfile` raíz y `server/Dockerfile`): Node
+**22** binario (apt en bookworm da 18, por debajo del mínimo) lo arranca en
+`127.0.0.1:4416` antes de uvicorn. Verificado en local con yt-dlp 2026.08.19 +
+plugin 1.3.2: `python -m unittest` (34 OK, incl. `test_youtube_pot.py`) y el
+servidor completo devolviendo escalera completa (Gangnam, Despacito, Thriller)
+con el proveedor propio; con un proveedor roto volvía a 360p. Falta verificación
+en Railway tras redesplegar.
+
 ### C6 · Un test codificaba el diagnóstico equivocado — **corregido 2026-10-05**
 
 `ExtractionErrorsTest` fallaba en `testDebugUnitTest`, y la culpa era del test, no

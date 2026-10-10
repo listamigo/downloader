@@ -45,10 +45,18 @@ class YouTube:
         }
         if self._settings.po_token:
             extractor_args["youtube"]["po_token"] = [self._settings.po_token]
+        # PO token por proveedor (yt-dlp >= 2025.05.22). Los args viejo
+        # `youtube:getpot_bgutil_*` están deprecados y el plugin 1.3.2 los
+        # ignora (verificado con yt-dlp 2026.08.19): el base_url/hook debe ir
+        # en el extractor-arg del PROVEEDOR (youtubepot-bgutilhttp/script).
         if self._settings.pot_script:
-            extractor_args["youtube"]["getpot_bgutil_script"] = [self._settings.pot_script]
+            extractor_args["youtubepot-bgutilscript"] = {
+                "server_home": [self._settings.pot_script]
+            }
         if self._settings.pot_baseurl:
-            extractor_args["youtube"]["getpot_bgutil_baseurl"] = [self._settings.pot_baseurl]
+            extractor_args["youtubepot-bgutilhttp"] = {
+                "base_url": [self._settings.pot_baseurl]
+            }
 
         opts: dict = {
             "quiet": True,
