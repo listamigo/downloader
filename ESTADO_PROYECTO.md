@@ -919,6 +919,20 @@ servidor completo devolviendo escalera completa (Gangnam, Despacito, Thriller)
 con el proveedor propio; con un proveedor roto volvía a 360p. Falta verificación
 en Railway tras redesplegar.
 
+**Telemetría de debug / Fase 1 del Plan de Rescate (2026-10-10, verificado en
+local):** se agregó `GET /api/debug/{id}` que corre yt-dlp **verbose sin
+descargar** y devuelve settings efectivas, ping al proveedor PO
+(`reachable`/`pingMs`), status/error, formatos y alturas, señales calculadas
+(`pluginMentioned`, `potProviderArgUsed`, `potTokenMentioned`, `getPotRequested`)
+y las últimas 80 líneas de log **redactadas** (cookies `SID/ST-`/tokens largos
+enmascarados); `?client=` fuerza un único `player_client`. Está **gateado con
+`DEBUG_TOKEN`** y es **fail-closed**: sin la variable responde `503`; con ella
+exige el header `X-Debug-Token` (o `?token=`) con comparación en tiempo
+constante (`secrets.compare_digest`). Verificado en local: `python -m unittest`
+(48 OK, incl. `test_debug.py`), y el gating probado con uvicorn (401 sin/erróneo,
+200 correcto por header y por query, 503 sin `DEBUG_TOKEN`). Commit `f3e3eff`.
+Falta leer la telemetría real en Railway tras redesplegar.
+
 ### C6 · Un test codificaba el diagnóstico equivocado — **corregido 2026-10-05**
 
 `ExtractionErrorsTest` fallaba en `testDebugUnitTest`, y la culpa era del test, no

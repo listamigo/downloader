@@ -19,10 +19,27 @@ activa con un interruptor en Ajustes.
 | GET | `/api/qualities/{id}` | Escalera de calidades real |
 | GET | `/api/related/{id}` | 501 (el cliente los pide en local) |
 | GET | `/api/media/{id}?quality=&type=video\|audio` | Bytes del medio (Range) |
+| GET | `/api/debug/{id}?client=` | Telemetría de PO token (requiere `DEBUG_TOKEN`) |
 | POST | `/api/cookies` | Sube `cookies.txt` (Netscape), cuerpo `{"content": "..."}` |
 | DELETE | `/api/cookies` | Borra las cookies |
 
 Documentación interactiva en `/docs`.
+
+### Telemetría de debug (`/api/debug/{id}`)
+
+Corre `yt-dlp` en modo verbose **sin descargar** y devuelve: settings efectivas,
+ping al proveedor PO (`reachable`/`pingMs`), resultado/errores, formatos y
+alturas halladas, señales calculadas (`pluginMentioned`, `potProviderArgUsed`,
+`potTokenMentioned`, `getPotRequested`) y las últimas 80 líneas de log
+**redactadas** (cookies/tokens enmascarados). `?client=web_safari` fuerza un
+único `player_client`.
+
+Requiere la env `DEBUG_TOKEN` (si falta, responde `503`):
+
+```bash
+curl -H "X-Debug-Token: $DEBUG_TOKEN" \
+  "https://<host>/api/debug/9bZkp7q19f0"
+```
 
 ## Variables de entorno
 
@@ -37,6 +54,7 @@ Documentación interactiva en `/docs`.
 | `YTDLP_POT_SCRIPT` | Ruta a `generate_once.js` del proveedor bgutil (modo script; requiere Node). |
 | `YTDLP_POT_BASEURL` | URL del proveedor bgutil por HTTP (modo sidecar). |
 | `VIDEO_CLIENTS` / `SEARCH_CLIENTS` | Orden de `player_client` (def. `default` primero). |
+| `DEBUG_TOKEN` | Habilita `/api/debug` (telemetría). **Fail-closed**: sin esta variable el endpoint responde `503`. Se envía en el header `X-Debug-Token` (o `?token=`). |
 
 > **Calidad medida (2026-10-09):** el techo **depende del entorno**, no de una
 > regla fija. El mismo código, sin PO token, en una red local daba solo **itag 18

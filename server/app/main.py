@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -105,12 +106,35 @@ async def clear_cookies() -> CookieResultDTO:
 _VIDEO_ID_RE = VIDEO_ID_RE
 
 
+def check_debug_auth(expected: str | None, provided: str | None) -> None:
+    """Autoriza `/api/debug`.
+
+    Fail-closed: sin `DEBUG_TOKEN` configurado el endpoint queda apagado (503)
+    en vez de abierto. Con token, exige coincidencia en tiempo constante.
+    """
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="debug deshabilitado: define DEBUG_TOKEN en el entorno",
+        )
+    if not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="falta o es invalido el token de debug")
+
+
 @app.get("/api/debug/{video_id}")
-async def debug(video_id: str, client: str | None = Query(default=None)) -> dict:
+async def debug(
+    video_id: str,
+    request: Request,
+    client: str | None = Query(default=None),
+) -> dict:
     """Telemetría de yt-dlp para diagnosticar el bot-check (no descarga nada).
 
-    `client` (opcional) fuerza un único `player_client`, p. ej. `web_safari`.
+    Requiere el header `X-Debug-Token` (o, como alternativa para `curl`,
+    `?token=`) coincidente con la env `DEBUG_TOKEN`. `client` (opcional) fuerza
+    un único `player_client`, p. ej. `web_safari`.
     """
+    provided = request.headers.get("X-Debug-Token") or request.query_params.get("token")
+    check_debug_auth(settings.debug_token, provided)
     if not _VIDEO_ID_RE.match(video_id):
         raise HTTPException(status_code=400, detail="video_id invalido")
     clients = (client,) if client else None

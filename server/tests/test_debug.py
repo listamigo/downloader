@@ -12,6 +12,22 @@ try:
 except Exception:  # pragma: no cover - depende del entorno
     AVAILABLE = False
 
+try:
+    from app.config import Settings  # type: ignore
+
+    CONFIG_AVAILABLE = True
+except Exception:  # pragma: no cover
+    CONFIG_AVAILABLE = False
+
+try:
+    from fastapi import HTTPException  # type: ignore
+
+    from app.main import check_debug_auth  # type: ignore
+
+    AUTH_AVAILABLE = True
+except Exception:  # pragma: no cover
+    AUTH_AVAILABLE = False
+
 
 @unittest.skipUnless(AVAILABLE, "dependencias del server no instaladas")
 class RedactTest(unittest.TestCase):
@@ -58,3 +74,34 @@ class VideoIdRegexTest(unittest.TestCase):
     def test_rechaza_basura(self) -> None:
         self.assertIsNone(VIDEO_ID_RE.match("../../etc/passwd"))
         self.assertIsNone(VIDEO_ID_RE.match("short"))
+
+
+@unittest.skipUnless(AUTH_AVAILABLE, "fastapi/app.main no disponibles")
+class DebugAuthTest(unittest.TestCase):
+    def test_sin_token_configurado_bloquea(self) -> None:
+        # Fail-closed: sin DEBUG_TOKEN el endpoint queda apagado.
+        with self.assertRaises(HTTPException) as ctx:
+            check_debug_auth(None, "loquesea")
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_sin_provided(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            check_debug_auth("secreto", None)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_token_incorrecto(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            check_debug_auth("secreto", "otro")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_token_correcto_pasa(self) -> None:
+        check_debug_auth("secreto", "secreto")  # no debe lanzar
+
+
+@unittest.skipUnless(CONFIG_AVAILABLE, "app.config no disponible")
+class ConfigDebugTokenTest(unittest.TestCase):
+    def test_default_none(self) -> None:
+        self.assertIsNone(Settings.from_env({}).debug_token)
+
+    def test_lee_env(self) -> None:
+        self.assertEqual(Settings.from_env({"DEBUG_TOKEN": "abc123"}).debug_token, "abc123")

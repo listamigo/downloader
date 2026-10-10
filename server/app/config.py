@@ -35,6 +35,7 @@ class Settings:
     po_token: str | None
     pot_script: str | None
     pot_baseurl: str | None
+    debug_token: str | None
     video_clients: tuple[str, ...]
     search_clients: tuple[str, ...]
     impersonate: tuple[str, ...]
@@ -51,6 +52,7 @@ class Settings:
         cookies_file = Path(cookies_env) if cookies_env else None
 
         po_token = env.get("YT_PO_TOKEN") or None
+        debug_token = env.get("DEBUG_TOKEN") or None
 
         video_clients = _clients(env.get("VIDEO_CLIENTS"), DEFAULT_VIDEO_CLIENTS)
         search_clients = _clients(env.get("SEARCH_CLIENTS"), DEFAULT_SEARCH_CLIENTS)
@@ -64,6 +66,7 @@ class Settings:
             po_token=po_token,
             pot_script=env.get("YTDLP_POT_SCRIPT") or None,
             pot_baseurl=env.get("YTDLP_POT_BASEURL") or None,
+            debug_token=debug_token,
             video_clients=video_clients,
             search_clients=search_clients,
             impersonate=impersonate,
