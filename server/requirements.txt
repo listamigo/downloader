@@ -11,5 +11,5 @@ yt-dlp[default,curl-cffi]>=2025.1.15
 # escalera completa hasta 4K. El plugin necesita un proveedor (ver README):
 #   - modo script: `YTDLP_POT_SCRIPT` -> ruta a generate_once.js (requiere Node)
 #   - modo HTTP:   `YTDLP_POT_BASEURL` -> servidor bgutil (imagen Docker)
-# Mantén plugin y script en la MISMA versión mayor.
-bgutil-ytdlp-pot-provider==1.3.2
+# Mantén plugin y proveedor en la MISMA versión mayor.
+bgutil-ytdlp-pot-provider==2.0.2

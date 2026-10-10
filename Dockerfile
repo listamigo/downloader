@@ -7,7 +7,7 @@
 # El proveedor de PO tokens (bgutil) viaja DENTRO de la imagen: Node 22 corre
 # el servidor HTTP del proveedor en 127.0.0.1:4416 y el backend consume
 # YTDLP_POT_BASEURL=http://127.0.0.1:4416. Todo en UN solo contenedor. Node se
-# baja como binario (apt en bookworm da 18 < 22, mínimo del proveedor 1.3.2).
+# baja como binario (apt en bookworm da 18 < 22, mínimo del proveedor 2.0.2).
 FROM python:3.12-slim
 
 ARG NODE_VERSION=v22.16.0
@@ -29,8 +29,11 @@ COPY server/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Proveedor de PO tokens: clona el tag que coincide con el plugin de
-# requirements.txt (1.3.2) e instala su build JS.
-RUN git clone --depth 1 --branch 1.3.2 \
+# requirements.txt (2.0.2) e instala su build JS. CACHEBUST permite forzar un
+# rebuild limpio si Railway reutiliza capas.
+ARG CACHEBUST=1
+RUN echo "cachebust=${CACHEBUST}" \
+    && git clone --depth 1 --branch 2.0.2 \
       https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/pot-provider \
     && cd /opt/pot-provider/server \
     && npm ci --include=dev --no-audit --no-fund \

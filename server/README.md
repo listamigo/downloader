@@ -71,7 +71,7 @@ curl -H "X-Debug-Token: $DEBUG_TOKEN" \
 >   `YTDLP_POT_BASEURL=http://<servicio>:4416`.
 > - **Modo script:** monta el repo `bgutil-ytdlp-pot-provider` (con `node_modules`)
 >   y su runtime Node, y apunta `YTDLP_POT_SCRIPT` a `server/build/generate_once.js`.
->   El script y el plugin deben compartir versión mayor (aquí fijada a `1.3.2`).
+>   El script y el plugin deben compartir versión mayor (aquí fijada a `2.0.2`).
 
 ## Despliegue en Railway
 
