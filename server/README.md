@@ -72,6 +72,13 @@ curl -H "X-Debug-Token: $DEBUG_TOKEN" \
 > - **Modo script:** monta el repo `bgutil-ytdlp-pot-provider` (con `node_modules`)
 >   y su runtime Node, y apunta `YTDLP_POT_SCRIPT` a `server/build/generate_once.js`.
 >   El script y el plugin deben compartir versión mayor (aquí fijada a `2.0.2`).
+>
+> **Versión del proveedor (verificado 2026-10-10):** con **1.3.2** la extracción
+> desde la IP de Railway devolvía `502 "Sign in to confirm you're not a bot"`;
+> con **2.0.2** (mismo mayor que el plugin) los 10 videos de prueba pasaron a
+> `200` con escalera completa. Usa **2.0.2 o superior** y mantén plugin y
+> proveedor alineados. Al reconstruir, recuerda `npm ci --include=dev && npx tsc`
+> para generar `build/main.js`.
 
 ## Despliegue en Railway
 

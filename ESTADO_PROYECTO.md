@@ -933,6 +933,30 @@ constante (`secrets.compare_digest`). Verificado en local: `python -m unittest`
 200 correcto por header y por query, 503 sin `DEBUG_TOKEN`). Commit `f3e3eff`.
 Falta leer la telemetría real en Railway tras redesplegar.
 
+**RESUELTO — el bot-check se elimina al subir el proveedor/plugin bgutil de
+1.3.2 a 2.0.2 (2026-10-10, VERIFICADO en Railway):** tras redesplegar con el
+proveedor **2.0.2** (mismo mayor que el plugin de `requirements.txt`), el log de
+arranque muestra `Started POT server (v2.0.2)`. Con eso, **los 10 IDs que antes
+devolvían `502 "Sign in to confirm you're not a bot"` ahora responden `200`** con
+la escalera completa: `dQw4w9WgXcQ`, `9bZkp7q19f0`, `kJQP7kiw5Fk`, `fJ9rUzIMcZQ`,
+`JGwWNGJdvx8`, `OPf0YbXqDm0`, `CevxZvSJLk8`, `RgKAFK5djSk`, `hT_nvWreIhg`,
+`YQHsXMglC9A`. Cambios: `server/requirements.txt` (`bgutil-ytdlp-pot-provider==2.0.2`),
+`Dockerfile` raíz y `server/Dockerfile` (`git clone --branch 2.0.2` + `ARG CACHEBUST`,
+manteniendo `npm ci --include=dev && npx tsc`, imprescindible para generar
+`build/main.js`). Commits `236a7d1` (gating de `/api/debug`) y `350ddfa` (bump).
+
+> **Nota sobre la causa raíz (honestidad de evidencia):** lo VERIFICADO es que
+> 1.3.2 **no** funcionaba desde Railway y 2.0.2 **sí**. NO se verificó (no hubo
+> telemetría con 1.3.2) que el fallo fuera "tokens inválidos" ni "incompatibilidad
+> con yt-dlp 2026.08.19": el plugin y el proveedor ya coincidían en mayor (1.3.2) y
+> el plugin no pinnea yt-dlp. La causa mecánica exacta sigue ASUMIDA; la palanca
+> que lo resuelve, medida.
+>
+> `VIDEO_CLIENTS` no se hardcodeó a `web_safari`: se deja la lista con reintentos
+> (`default` primero) porque `default` es el cliente que ya funcionaba. Para un
+> test de aislamiento a un solo cliente: env `VIDEO_CLIENTS=web_safari` o
+> `/api/debug/{id}?client=web_safari`.
+
 ### C6 · Un test codificaba el diagnóstico equivocado — **corregido 2026-10-05**
 
 `ExtractionErrorsTest` fallaba en `testDebugUnitTest`, y la culpa era del test, no
